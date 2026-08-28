@@ -1,0 +1,37 @@
+services:
+  updater:
+    build: .
+    image: ghcr.io/jmengit/unraid-container-updater:latest
+    ports:
+      - "8080:8080"
+    environment:
+      APP_MODE: report_only
+      DATABASE_URL: sqlite:////data/updater.db
+      TIMEZONE: America/Chicago
+      SCAN_CRON: "45 6 * * *"
+      TRUSTED_HOSTS: localhost,127.0.0.1
+      ADMIN_USERNAME: admin
+      ADMIN_PASSWORD_FILE: /run/secrets/admin_password
+      SESSION_SECRET_FILE: /run/secrets/session_secret
+    secrets:
+      - admin_password
+      - session_secret
+    volumes:
+      - updater-data:/data
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,noexec,nosuid,nodev
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+volumes:
+  updater-data:
+
+secrets:
+  admin_password:
+    file: ./secrets/admin_password
+  session_secret:
+    file: ./secrets/session_secret
