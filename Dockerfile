@@ -12,6 +12,7 @@ LABEL org.opencontainers.image.source="https://github.com/jmengit/unraid-contain
       org.opencontainers.image.description="Approval-driven Unraid container update dashboard" \
       org.opencontainers.image.version="${APP_VERSION}"
 ENV PATH="/app/.venv/bin:$PATH" \
+    PYTHONPATH="/app/src" \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     APP_MODE=report_only
