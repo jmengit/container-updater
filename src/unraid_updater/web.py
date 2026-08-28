@@ -20,6 +20,13 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from .config import Settings
 from .db import Database
+from .docker_runtime import (
+    ExecutionBlocked,
+    execute_update,
+    inspect_live,
+    inventory,
+    target_repository,
+)
 from .importer import import_latest
 from .scheduler import build_scheduler
 
@@ -95,7 +102,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if scheduler:
                 scheduler.shutdown(wait=False)
 
-    app = FastAPI(title="Unraid Container Updater", version="0.1.0", lifespan=lifespan)
+    app = FastAPI(title="Unraid Container Updater", version="0.2.0", lifespan=lifespan)
     app.state.settings = settings
     app.state.db = db
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=list(settings.trusted_hosts))
@@ -168,8 +175,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         candidate = db.get_candidate(candidate_id)
         if not candidate:
             raise HTTPException(status_code=404, detail="candidate not found")
+        live = None
+        approval = db.active_approval(candidate_id, candidate["revision_hash"])
+        if settings.app_mode == "approval_driven" and candidate["status"] == "approval_ready":
+            try:
+                live = inspect_live(
+                    candidate["container_name"], settings.docker_socket,
+                    Path(settings.docker_template_dir),
+                )
+            except ExecutionBlocked:
+                live = None
         return TEMPLATES.TemplateResponse(request, "candidate.html", {
             "candidate": candidate, "csrf": csrf_token(request), "mode": settings.app_mode,
+            "live": live, "approval": approval,
         })
 
     def decide(request: Request, candidate_id: int, revision: str, csrf: str, decision: str, reason: str):
@@ -192,9 +210,76 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ):
         return decide(request, candidate_id, revision, csrf, "deferred", reason)
 
+    @app.post("/candidates/{candidate_id}/execute")
+    def execute_candidate(
+        request: Request,
+        candidate_id: int,
+        csrf: str = Form(...),
+        revision: str = Form(...),
+        live_revision: str = Form(...),
+        confirm_container: str = Form(...),
+    ):
+        actor = require_auth(request)
+        check_csrf(request, csrf)
+        if settings.app_mode != "approval_driven":
+            raise HTTPException(status_code=409, detail="Execution is disabled")
+        candidate = db.get_candidate(candidate_id)
+        if candidate is None:
+            raise HTTPException(status_code=404, detail="candidate not found")
+        if candidate["revision_hash"] != revision:
+            raise HTTPException(status_code=409, detail="candidate revision changed")
+        if candidate["status"] != "approval_ready":
+            raise HTTPException(status_code=409, detail="candidate is not approval-ready")
+        if candidate["risk"] != "low" or candidate["change_type"] not in {"patch", "minor"}:
+            raise HTTPException(status_code=409, detail="only low-risk patch/minor execution is allowed")
+        if candidate["state"] != "running":
+            raise HTTPException(status_code=409, detail="stopped containers are never updated")
+        if confirm_container != candidate["container_name"]:
+            raise HTTPException(status_code=409, detail="container confirmation did not match")
+        approval = db.active_approval(candidate_id, revision)
+        if approval is None:
+            raise HTTPException(status_code=409, detail="a current approval is required")
+        evidence = inspect_live(
+            candidate["container_name"], settings.docker_socket,
+            Path(settings.docker_template_dir),
+        )
+        if evidence.revision != live_revision:
+            raise HTTPException(status_code=409, detail="live evidence changed; review again")
+        target = target_repository(candidate["current_image"], candidate["target"])
+        execution_id = db.start_execution(
+            candidate_id, approval["id"], revision, live_revision, actor
+        )
+        try:
+            result = execute_update(
+                name=candidate["container_name"], target_image=target,
+                expected_live_revision=live_revision,
+                socket_path=settings.docker_socket,
+                template_dir=Path(settings.docker_template_dir),
+                backup_root=Path(settings.docker_backup_root),
+                self_name=settings.self_container_name,
+            )
+        except (ExecutionBlocked, RuntimeError) as exc:
+            db.finish_execution(execution_id, "failed", {}, str(exc))
+            db.audit(actor, "execution.failed", "candidate", str(candidate_id), {
+                "execution_id": execution_id, "error": str(exc), "target": target
+            })
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        db.finish_execution(execution_id, "succeeded", result)
+        db.audit(actor, "execution.succeeded", "candidate", str(candidate_id), {
+            "execution_id": execution_id, **result
+        })
+        return RedirectResponse(f"/candidates/{candidate_id}", status_code=303)
+
     @app.get("/api/v1/health")
     def health() -> dict[str, str]:
         return {"status": "ok", "mode": settings.app_mode}
+
+    @app.get("/api/v1/inventory")
+    def inventory_api(request: Request):
+        require_auth(request)
+        if settings.app_mode != "approval_driven":
+            raise HTTPException(status_code=409, detail="Docker inventory is disabled")
+        return {"containers": inventory(settings.docker_socket, settings.self_container_name)}
 
     @app.get("/api/v1/summary")
     def summary(request: Request) -> dict[str, Any]:

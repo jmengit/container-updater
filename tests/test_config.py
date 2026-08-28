@@ -5,10 +5,27 @@ import pytest
 from unraid_updater.config import Settings
 
 
-def test_execution_mode_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_unknown_execution_mode_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("APP_MODE", "execution_enabled")
-    with pytest.raises(ValueError, match="report_only"):
+    with pytest.raises(ValueError, match="report_only or approval_driven"):
         Settings.from_env()
+
+
+def test_approval_driven_requires_exact_confirmation() -> None:
+    settings = Settings(
+        app_mode="approval_driven", admin_password="a" * 12,
+        session_secret="x" * 32, execution_confirmation="wrong",
+    )
+    with pytest.raises(ValueError, match="exact execution confirmation"):
+        settings.validate_for_server()
+
+
+def test_approval_driven_accepts_exact_confirmation() -> None:
+    Settings(
+        app_mode="approval_driven", admin_password="a" * 12,
+        session_secret="x" * 32,
+        execution_confirmation="I_UNDERSTAND_CONTAINER_UPDATES_MUTATE_UNRAID",
+    ).validate_for_server()
 
 
 def test_server_requires_real_secrets() -> None:

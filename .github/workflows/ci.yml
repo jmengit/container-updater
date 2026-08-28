@@ -28,4 +28,4 @@ jobs:
           push: false
           load: true
           tags: unraid-container-updater:ci
-      - run: docker inspect unraid-container-updater:ci --format '{{json .Config.User}}' | grep -q '10001:10001'
+      - run: test "$(docker inspect unraid-container-updater:ci --format '{{json .Config.User}}')" = '"root"'

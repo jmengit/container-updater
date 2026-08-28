@@ -37,6 +37,13 @@ CREATE TABLE IF NOT EXISTS audit_events (
  event_type TEXT NOT NULL, entity_type TEXT NOT NULL, entity_id TEXT NOT NULL,
  details_json TEXT NOT NULL, prev_hash TEXT NOT NULL, event_hash TEXT NOT NULL UNIQUE
 );
+CREATE TABLE IF NOT EXISTS executions (
+ id INTEGER PRIMARY KEY, candidate_id INTEGER NOT NULL REFERENCES candidates(id),
+ approval_id INTEGER NOT NULL REFERENCES approvals(id), candidate_revision TEXT NOT NULL,
+ live_revision TEXT NOT NULL, actor TEXT NOT NULL, status TEXT NOT NULL,
+ started_at TEXT NOT NULL, finished_at TEXT, result_json TEXT NOT NULL DEFAULT '{}',
+ error_text TEXT NOT NULL DEFAULT ''
+);
 CREATE INDEX IF NOT EXISTS idx_candidates_status ON candidates(status);
 CREATE INDEX IF NOT EXISTS idx_approvals_candidate ON approvals(candidate_id, created_at);
 """
@@ -168,6 +175,44 @@ class Database:
             "candidate_revision": revision, "approval_id": approval_id, "reason": reason[:500]
         })
         return approval_id
+
+    def active_approval(self, candidate_id: int, revision: str) -> dict[str, Any] | None:
+        with self.connect() as connection:
+            row = connection.execute(
+                """SELECT * FROM approvals WHERE candidate_id=? AND candidate_revision=?
+                AND decision='approved' AND revoked_at IS NULL AND expires_at > ?
+                ORDER BY id DESC LIMIT 1""",
+                (candidate_id, revision, utcnow()),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def start_execution(
+        self, candidate_id: int, approval_id: int, revision: str,
+        live_revision: str, actor: str,
+    ) -> int:
+        with self.connect() as connection:
+            running = connection.execute(
+                "SELECT id FROM executions WHERE candidate_id=? AND status='running'",
+                (candidate_id,),
+            ).fetchone()
+            if running:
+                raise ValueError("an execution is already running for this candidate")
+            cursor = connection.execute(
+                """INSERT INTO executions(candidate_id,approval_id,candidate_revision,
+                live_revision,actor,status,started_at) VALUES(?,?,?,?,?,'running',?)""",
+                (candidate_id, approval_id, revision, live_revision, actor, utcnow()),
+            )
+            return int(cursor.lastrowid)
+
+    def finish_execution(
+        self, execution_id: int, status: str, result: dict[str, Any], error: str = ""
+    ) -> None:
+        with self.connect() as connection:
+            connection.execute(
+                """UPDATE executions SET status=?,finished_at=?,result_json=?,error_text=?
+                WHERE id=?""",
+                (status, utcnow(), json.dumps(result, sort_keys=True), error, execution_id),
+            )
 
     def audit(self, actor: str, event_type: str, entity_type: str, entity_id: str, details: dict[str, Any]) -> None:
         occurred = utcnow()
