@@ -4,17 +4,19 @@ Private, authenticated, policy-driven dashboard for Saturn's Unraid container up
 
 ## Current release boundary
 
-**v0.1 is report-only.** It imports the existing Hermes updater report, explains candidate status, and records revision-bound approval/defer intent. It has no Docker socket, privileged mode, host mutation route, execution endpoint, or code capable of updating/restarting a container.
+**v0.2 is approval-driven.** It imports the existing Hermes updater report and uses the Docker socket for bounded inventory and explicitly confirmed, low-risk patch/minor updates. It is never fully automatic: approval, a second typed confirmation, current revision, running state, template identity, and live image must all match immediately before mutation.
 
 ## Safety defaults
 
-- `APP_MODE=report_only` is mandatory; other values fail startup.
+- `APP_MODE=report_only` remains the default. `approval_driven` requires the exact execution acknowledgment.
 - Only running, explicitly classified, low-risk patch/minor candidates may become approval-ready after soak.
 - Stopped, medium/high/critical, major, pinned, notify-only, breaking-review, unresolved, or flavor-changing cases remain manual.
 - Approval is bound to an exact candidate revision and expires after 24 hours.
 - Web mutations require authentication and CSRF.
 - SQLite audit events are hash chained.
-- The image runs as UID/GID 10001 with no capabilities and supports a read-only root filesystem.
+- Direct Docker socket access is host-root-equivalent. Production runs as root with all capabilities dropped and no host-root mount; keep the UI LAN-only.
+- The updater cannot update itself and never updates or starts a stopped container.
+- The original container is retained under a rollback name until the replacement is running/healthy; dockerMan template and inspect evidence are backed up first.
 
 ## Local development
 

@@ -26,14 +26,17 @@ class Settings:
     session_secret: str = ""
     legacy_state_dir: str = ""
     log_level: str = "INFO"
+    docker_socket: str = "/var/run/docker.sock"
+    docker_template_dir: str = "/boot/config/plugins/dockerMan/templates-user"
+    docker_backup_root: str = "/backups"
+    self_container_name: str = "unraid-container-updater"
+    execution_confirmation: str = ""
 
     @classmethod
     def from_env(cls) -> Settings:
         mode = os.getenv("APP_MODE", "report_only")
-        if mode != "report_only":
-            raise ValueError(
-                "This release supports APP_MODE=report_only only; execution is intentionally absent"
-            )
+        if mode not in {"report_only", "approval_driven"}:
+            raise ValueError("APP_MODE must be report_only or approval_driven")
         return cls(
             app_mode=mode,
             database_url=os.getenv("DATABASE_URL", "sqlite:////data/updater.db"),
@@ -50,6 +53,15 @@ class Settings:
             session_secret=_secret("SESSION_SECRET"),
             legacy_state_dir=os.getenv("LEGACY_STATE_DIR", ""),
             log_level=os.getenv("LOG_LEVEL", "INFO"),
+            docker_socket=os.getenv("DOCKER_SOCKET", "/var/run/docker.sock"),
+            docker_template_dir=os.getenv(
+                "DOCKER_TEMPLATE_DIR", "/boot/config/plugins/dockerMan/templates-user"
+            ),
+            docker_backup_root=os.getenv("DOCKER_BACKUP_ROOT", "/backups"),
+            self_container_name=os.getenv(
+                "SELF_CONTAINER_NAME", "unraid-container-updater"
+            ),
+            execution_confirmation=_secret("EXECUTION_CONFIRMATION"),
         )
 
     def validate_for_server(self) -> None:
@@ -57,5 +69,11 @@ class Settings:
             raise ValueError("ADMIN_PASSWORD(_FILE) must contain at least 12 characters")
         if len(self.session_secret) < 32:
             raise ValueError("SESSION_SECRET(_FILE) must contain at least 32 characters")
+        if self.app_mode == "approval_driven":
+            expected = "I_UNDERSTAND_CONTAINER_UPDATES_MUTATE_UNRAID"
+            if self.execution_confirmation != expected:
+                raise ValueError("approval_driven mode requires the exact execution confirmation")
+            if self.docker_socket != "/var/run/docker.sock":
+                raise ValueError("approval_driven mode requires /var/run/docker.sock")
         if not self.trusted_hosts:
             raise ValueError("TRUSTED_HOSTS cannot be empty")
