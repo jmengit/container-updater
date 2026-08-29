@@ -47,3 +47,10 @@ def test_portainer_instances_load_from_protected_file(
     config.write_text('[{"name":"remote","url":"https://host","token":"secret"}]')
     monkeypatch.setenv("PORTAINER_INSTANCES_FILE", str(config))
     assert Settings.from_env().portainer_instances[0]["name"] == "remote"
+
+
+def test_optional_portainer_file_may_be_absent(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    monkeypatch.setenv("PORTAINER_INSTANCES_FILE", str(tmp_path / "missing.json"))
+    assert Settings.from_env().portainer_instances == ()

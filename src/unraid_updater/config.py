@@ -10,7 +10,12 @@ from pathlib import Path
 def _secret(name: str, default: str = "") -> str:
     file_value = os.getenv(f"{name}_FILE")
     if file_value:
-        return Path(file_value).read_text(encoding="utf-8").strip()
+        path = Path(file_value)
+        if path.exists():
+            return path.read_text(encoding="utf-8").strip()
+        if default:
+            return default
+        return ""
     return os.getenv(name, default)
 
 
