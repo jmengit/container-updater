@@ -62,6 +62,16 @@ def test_login_and_dashboard_security_headers(tmp_path: Path, monkeypatch) -> No
         assert "default-src 'self'" in response.headers["content-security-policy"]
 
 
+def test_manual_scan_uses_wud_without_legacy_state(tmp_path: Path, monkeypatch) -> None:
+    with client(tmp_path, monkeypatch) as c:
+        login(c)
+        page = c.get("/")
+        response = c.post("/scans", data={"csrf": token(page.text)}, follow_redirects=False)
+        assert response.status_code == 303
+        summary = c.get("/api/v1/summary").json()
+        assert summary["latest_scan"]["trigger"] == "manual_wud_api"
+
+
 def test_login_rejects_bad_csrf(tmp_path: Path) -> None:
     with client(tmp_path) as c:
         response = c.post("/login", data={"username": "saturn", "password": "bad", "csrf": "bad"})
