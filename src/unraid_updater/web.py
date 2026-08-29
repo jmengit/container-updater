@@ -121,7 +121,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         finally:
             scheduler.shutdown(wait=False)
 
-    app = FastAPI(title="Container Updater", version="0.4.0", lifespan=lifespan)
+    app = FastAPI(title="Container Updater", version="0.4.1", lifespan=lifespan)
     app.state.settings = settings
     app.state.db = db
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=list(settings.trusted_hosts))
