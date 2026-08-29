@@ -3,9 +3,9 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "unraid-container-updater"
-version = "0.2.0"
-description = "Approval-driven, policy-bound Unraid container update dashboard"
+name = "container-updater"
+version = "0.3.0"
+description = "Approval-driven local Docker and remote Portainer update dashboard"
 requires-python = ">=3.11"
 dependencies = [
     "apscheduler>=3.11.3",
@@ -28,7 +28,7 @@ where = ["src"]
 unraid_updater = ["templates/*.html", "static/*.css"]
 
 [project.scripts]
-unraid-container-updater = "unraid_updater.main:run"
+container-updater = "unraid_updater.main:run"
 
 [tool.pytest.ini_options]
 addopts = "-q"
