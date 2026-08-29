@@ -99,7 +99,9 @@ def inspect_live(
     )
 
 
-def inventory(socket_path: str, excluded_name: str) -> list[dict[str, Any]]:
+def inventory(
+    socket_path: str, excluded_name: str, template_dir: Path = TEMPLATE_DIR
+) -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
     client = client_from_socket(socket_path)
     for container in client.containers.list(all=True):
@@ -109,7 +111,7 @@ def inventory(socket_path: str, excluded_name: str) -> list[dict[str, Any]]:
         if not name or name == excluded_name:
             continue
         try:
-            template = find_template(name)
+            template = find_template(name, template_dir)
             template_hash = hashlib.sha256(template.read_bytes()).hexdigest()
         except ExecutionBlocked:
             template, template_hash = None, ""
@@ -121,6 +123,9 @@ def inventory(socket_path: str, excluded_name: str) -> list[dict[str, Any]]:
             "health": str(attrs.get("State", {}).get("Health", {}).get("Status", "")),
             "template_path": str(template or ""),
             "template_hash": template_hash,
+            "provider": "local",
+            "provider_name": "Local Docker",
+            "managed_by": "dockerMan" if template else "docker",
         })
     return sorted(result, key=lambda row: row["container"].lower())
 

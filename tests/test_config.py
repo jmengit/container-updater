@@ -38,3 +38,12 @@ def test_server_requires_real_secrets() -> None:
 def test_safe_defaults_are_report_only(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("APP_MODE", raising=False)
     assert Settings.from_env().app_mode == "report_only"
+
+
+def test_portainer_instances_load_from_protected_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    config = tmp_path / "portainer.json"
+    config.write_text('[{"name":"remote","url":"https://host","token":"secret"}]')
+    monkeypatch.setenv("PORTAINER_INSTANCES_FILE", str(config))
+    assert Settings.from_env().portainer_instances[0]["name"] == "remote"

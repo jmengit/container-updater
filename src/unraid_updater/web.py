@@ -28,6 +28,8 @@ from .docker_runtime import (
     target_repository,
 )
 from .importer import import_latest
+from .portainer import PortainerError
+from .portainer import inventory as portainer_inventory
 from .scheduler import build_scheduler
 
 ROOT = Path(__file__).parent
@@ -102,7 +104,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if scheduler:
                 scheduler.shutdown(wait=False)
 
-    app = FastAPI(title="Unraid Container Updater", version="0.2.0", lifespan=lifespan)
+    app = FastAPI(title="Container Updater", version="0.3.0", lifespan=lifespan)
     app.state.settings = settings
     app.state.db = db
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=list(settings.trusted_hosts))
@@ -162,10 +164,30 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if not authenticated(request):
             return RedirectResponse("/login", status_code=303)
         candidates = db.list_candidates()
+        local_error = ""
+        remote_errors: list[str] = []
+        try:
+            local_containers = inventory(
+                settings.docker_socket,
+                settings.self_container_name,
+                Path(settings.docker_template_dir),
+            )
+        except (OSError, RuntimeError) as exc:
+            local_containers = []
+            local_error = str(exc)
+        remote_containers: list[dict[str, Any]] = []
+        for instance in settings.portainer_instances:
+            try:
+                remote_containers.extend(portainer_inventory(instance))
+            except PortainerError as exc:
+                remote_errors.append(f"{instance.get('name', 'Portainer')}: {exc}")
         return TEMPLATES.TemplateResponse(request, "dashboard.html", {
             "user": require_auth(request), "csrf": csrf_token(request),
             "counts": db.counts(), "latest_scan": db.latest_scan(),
             "candidates": candidates, "mode": settings.app_mode,
+            "local_containers": local_containers, "remote_containers": remote_containers,
+            "local_error": local_error, "remote_errors": remote_errors,
+            "template_ready": Path(settings.docker_template_dir).is_dir(),
         })
 
     @app.get("/candidates/{candidate_id}", response_class=HTMLResponse)
@@ -279,7 +301,28 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         require_auth(request)
         if settings.app_mode != "approval_driven":
             raise HTTPException(status_code=409, detail="Docker inventory is disabled")
-        return {"containers": inventory(settings.docker_socket, settings.self_container_name)}
+        return {"containers": inventory(
+            settings.docker_socket,
+            settings.self_container_name,
+            Path(settings.docker_template_dir),
+        )}
+
+    @app.get("/api/v1/fleet")
+    def fleet_api(request: Request):
+        require_auth(request)
+        local = inventory(
+            settings.docker_socket,
+            settings.self_container_name,
+            Path(settings.docker_template_dir),
+        )
+        remote: list[dict[str, Any]] = []
+        errors: list[str] = []
+        for instance in settings.portainer_instances:
+            try:
+                remote.extend(portainer_inventory(instance))
+            except PortainerError as exc:
+                errors.append(f"{instance.get('name', 'Portainer')}: {exc}")
+        return {"local": local, "remote": remote, "errors": errors}
 
     @app.get("/api/v1/summary")
     def summary(request: Request) -> dict[str, Any]:

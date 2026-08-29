@@ -10,7 +10,7 @@ from unraid_updater.importer import import_report
 from unraid_updater.web import create_app
 
 
-def client(tmp_path: Path) -> TestClient:
+def client(tmp_path: Path, monkeypatch=None) -> TestClient:
     settings = Settings(
         database_url=f"sqlite:///{tmp_path / 'web.db'}",
         admin_username="saturn",
@@ -18,7 +18,15 @@ def client(tmp_path: Path) -> TestClient:
         session_secret="x" * 48,
         trusted_hosts=("testserver",),
     )
-    return TestClient(create_app(settings))
+    if monkeypatch is not None:
+        monkeypatch.setattr("unraid_updater.web.inventory", lambda *_args: [{
+            "container": "Example", "state": "running", "image": "example/app:1.0.0",
+            "image_id": "sha256:1", "health": "healthy", "template_path": "/template.xml",
+            "template_hash": "abc", "provider": "local", "provider_name": "Local Docker",
+            "managed_by": "dockerMan",
+        }])
+    app = create_app(settings)
+    return TestClient(app)
 
 
 def token(html: str) -> str:
@@ -41,12 +49,14 @@ def test_health_is_public_and_report_only(tmp_path: Path) -> None:
         assert c.get("/api/v1/summary").status_code == 401
 
 
-def test_login_and_dashboard_security_headers(tmp_path: Path) -> None:
-    with client(tmp_path) as c:
+def test_login_and_dashboard_security_headers(tmp_path: Path, monkeypatch) -> None:
+    with client(tmp_path, monkeypatch) as c:
         login(c)
         response = c.get("/")
         assert response.status_code == 200
-        assert "Nothing needs approval" in response.text
+        assert "Update candidates" in response.text
+        assert "1 containers visible" in response.text
+        assert "Local Docker" in response.text
         assert response.headers["x-frame-options"] == "DENY"
         assert "default-src 'self'" in response.headers["content-security-policy"]
 

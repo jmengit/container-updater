@@ -7,9 +7,9 @@ COPY src ./src
 RUN uv sync --frozen --no-dev
 
 FROM python:3.12.11-slim-bookworm
-ARG APP_VERSION=0.2.0
+ARG APP_VERSION=0.3.0
 LABEL org.opencontainers.image.source="https://github.com/jmengit/unraid-container-updater" \
-      org.opencontainers.image.description="Approval-driven Unraid container update dashboard" \
+      org.opencontainers.image.description="Approval-driven local Docker and remote Portainer update dashboard" \
       org.opencontainers.image.version="${APP_VERSION}"
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONPATH="/app/src" \
