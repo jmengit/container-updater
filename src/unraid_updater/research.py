@@ -25,13 +25,16 @@ class ResearchConfig:
     verify_tls: bool = True
     timeout_seconds: int = 30
     max_issues: int = 12
+    llm_headers: tuple[tuple[str, str], ...] = ()
 
 
 def _request(url: str, *, token: str = "", body: dict[str, Any] | None = None,
-             verify_tls: bool = True, timeout: int = 30) -> Any:
+             verify_tls: bool = True, timeout: int = 30,
+             extra_headers: tuple[tuple[str, str], ...] = ()) -> Any:
     headers = {"Accept": "application/vnd.github+json", "User-Agent": "container-updater/0.5"}
     if token:
         headers["Authorization"] = f"Bearer {token}"
+    headers.update(dict(extra_headers))
     data = None
     if body is not None:
         headers["Content-Type"] = "application/json"
@@ -105,7 +108,8 @@ def analyze(config: ResearchConfig, evidence: dict[str, Any]) -> dict[str, Any]:
     }
     url = config.llm_base_url.rstrip("/") + "/chat/completions"
     response = _request(url, token=config.llm_api_key, body=body,
-                        verify_tls=config.verify_tls, timeout=config.timeout_seconds)
+                        verify_tls=config.verify_tls, timeout=config.timeout_seconds,
+                        extra_headers=config.llm_headers)
     try:
         result = json.loads(response["choices"][0]["message"]["content"])
     except (KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:

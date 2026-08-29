@@ -45,6 +45,8 @@
   <Config Name="LLM Model" Target="LLM_MODEL" Default="" Description="Provider/model identifier" Type="Variable" Display="always" Required="false" Mask="false"></Config>
   <Config Name="GitHub Token" Target="GITHUB_TOKEN" Default="" Description="Optional token for higher GitHub API limits" Type="Variable" Display="advanced" Required="false" Mask="true"></Config>
   <Config Name="Research Verify TLS" Target="RESEARCH_VERIFY_TLS" Default="true" Description="Verify LLM TLS certificates" Type="Variable" Display="advanced" Required="true" Mask="false">true</Config>
+  <Config Name="LLM CF Access ID" Target="LLM_CF_ACCESS_CLIENT_ID" Default="" Description="Optional Cloudflare Access service-token ID" Type="Variable" Display="advanced" Required="false" Mask="true"></Config>
+  <Config Name="LLM CF Access Secret" Target="LLM_CF_ACCESS_CLIENT_SECRET" Default="" Description="Optional Cloudflare Access service-token secret" Type="Variable" Display="advanced" Required="false" Mask="true"></Config>
   <Config Name="Portainer URL" Target="PORTAINER_URL" Default="" Description="Required only when Target Type is portainer" Type="Variable" Display="advanced" Required="false" Mask="false"/>
   <Config Name="Portainer Token" Target="PORTAINER_TOKEN" Default="" Description="Required only when Target Type is portainer" Type="Variable" Display="advanced" Required="false" Mask="true"/>
   <Config Name="Portainer Endpoint ID" Target="PORTAINER_ENDPOINT_ID" Default="0" Description="Exactly one Portainer endpoint ID" Type="Variable" Display="advanced" Required="false" Mask="false">0</Config>

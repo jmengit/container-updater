@@ -49,6 +49,8 @@ class Settings:
     llm_model: str = ""
     github_token: str = ""
     research_verify_tls: bool = True
+    llm_cf_access_client_id: str = ""
+    llm_cf_access_client_secret: str = ""
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -93,6 +95,8 @@ class Settings:
             llm_model=os.getenv("LLM_MODEL", ""),
             github_token=_secret("GITHUB_TOKEN"),
             research_verify_tls=os.getenv("RESEARCH_VERIFY_TLS", "true").lower() == "true",
+            llm_cf_access_client_id=_secret("LLM_CF_ACCESS_CLIENT_ID"),
+            llm_cf_access_client_secret=_secret("LLM_CF_ACCESS_CLIENT_SECRET"),
         )
 
     def validate_for_server(self) -> None:
