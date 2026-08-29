@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <Container version="2">
   <Name>container-updater</Name>
-  <Repository>local/container-updater:0.4.1</Repository>
+  <Repository>local/container-updater:0.5.0</Repository>
   <Registry>https://github.com/jmengit/container-updater/pkgs/container/container-updater</Registry>
   <Network>bridge</Network>
   <Shell>sh</Shell>
@@ -38,7 +38,13 @@
   <Config Name="WUD URL" Target="WUD_URL" Default="http://192.168.1.50:3030" Description="WUD REST API for this target machine" Type="Variable" Display="always" Required="true" Mask="false">http://192.168.1.50:3030</Config>
   <Config Name="WUD Username" Target="WUD_USERNAME" Default="" Description="Optional WUD Basic Auth username" Type="Variable" Display="advanced" Required="false" Mask="false"/>
   <Config Name="WUD Password" Target="WUD_PASSWORD" Default="" Description="Optional WUD Basic Auth password" Type="Variable" Display="advanced" Required="false" Mask="true"/>
-  <Config Name="WUD Verify TLS" Target="WUD_VERIFY_TLS" Default="true" Description="Verify WUD HTTPS certificate" Type="Variable" Display="advanced" Required="true" Mask="false">true</Config>
+  <Config Name="WUD Verify TLS" Target="WUD_VERIFY_TLS" Default="true" Description="Verify WUD TLS certificates" Type="Variable" Display="advanced" Required="true" Mask="false">true</Config>
+  <Config Name="LLM Research" Target="RESEARCH_ENABLED" Default="false" Description="Optional advisory-only GitHub release and issue analysis" Type="Variable" Display="always" Required="true" Mask="false">false</Config>
+  <Config Name="LLM Base URL" Target="LLM_BASE_URL" Default="" Description="OpenAI-compatible API base ending in /v1" Type="Variable" Display="always" Required="false" Mask="false"></Config>
+  <Config Name="LLM API Key" Target="LLM_API_KEY" Default="" Description="OpenAI-compatible API key" Type="Variable" Display="always" Required="false" Mask="true"></Config>
+  <Config Name="LLM Model" Target="LLM_MODEL" Default="" Description="Provider/model identifier" Type="Variable" Display="always" Required="false" Mask="false"></Config>
+  <Config Name="GitHub Token" Target="GITHUB_TOKEN" Default="" Description="Optional token for higher GitHub API limits" Type="Variable" Display="advanced" Required="false" Mask="true"></Config>
+  <Config Name="Research Verify TLS" Target="RESEARCH_VERIFY_TLS" Default="true" Description="Verify LLM TLS certificates" Type="Variable" Display="advanced" Required="true" Mask="false">true</Config>
   <Config Name="Portainer URL" Target="PORTAINER_URL" Default="" Description="Required only when Target Type is portainer" Type="Variable" Display="advanced" Required="false" Mask="false"/>
   <Config Name="Portainer Token" Target="PORTAINER_TOKEN" Default="" Description="Required only when Target Type is portainer" Type="Variable" Display="advanced" Required="false" Mask="true"/>
   <Config Name="Portainer Endpoint ID" Target="PORTAINER_ENDPOINT_ID" Default="0" Description="Exactly one Portainer endpoint ID" Type="Variable" Display="advanced" Required="false" Mask="false">0</Config>

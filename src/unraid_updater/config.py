@@ -43,6 +43,12 @@ class Settings:
     wud_username: str = ""
     wud_password: str = ""
     wud_verify_tls: bool = True
+    research_enabled: bool = False
+    llm_base_url: str = ""
+    llm_api_key: str = ""
+    llm_model: str = ""
+    github_token: str = ""
+    research_verify_tls: bool = True
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -81,6 +87,12 @@ class Settings:
             wud_username=os.getenv("WUD_USERNAME", ""),
             wud_password=_secret("WUD_PASSWORD"),
             wud_verify_tls=os.getenv("WUD_VERIFY_TLS", "true").lower() == "true",
+            research_enabled=os.getenv("RESEARCH_ENABLED", "false").lower() == "true",
+            llm_base_url=os.getenv("LLM_BASE_URL", "").rstrip("/"),
+            llm_api_key=_secret("LLM_API_KEY"),
+            llm_model=os.getenv("LLM_MODEL", ""),
+            github_token=_secret("GITHUB_TOKEN"),
+            research_verify_tls=os.getenv("RESEARCH_VERIFY_TLS", "true").lower() == "true",
         )
 
     def validate_for_server(self) -> None:
@@ -94,6 +106,8 @@ class Settings:
             raise ValueError("ADMIN_PASSWORD(_FILE) must contain at least 12 characters")
         if len(self.session_secret) < 32:
             raise ValueError("SESSION_SECRET(_FILE) must contain at least 32 characters")
+        if self.research_enabled and not (self.llm_base_url and self.llm_api_key and self.llm_model):
+            raise ValueError("research requires LLM base URL, API key, and model")
         if self.app_mode == "approval_driven":
             expected = "I_UNDERSTAND_CONTAINER_UPDATES_MUTATE_UNRAID"
             if self.execution_confirmation != expected:
