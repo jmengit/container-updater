@@ -339,7 +339,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def scan(request: Request, csrf: str = Form()):
         actor = require_auth(request)
         check_csrf(request, csrf)
-        result = scan_wud(db, wud_rows(), target_inventory_rows(), trigger="manual_wud_api") if settings.legacy_state_dir else None
+        result = scan_wud(db, wud_rows(), target_inventory_rows(), trigger="manual_wud_api")
         db.audit(actor, "scan.requested", "scan", "manual", {"imported": result})
         return RedirectResponse("/", status_code=303)
 
