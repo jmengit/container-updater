@@ -25,6 +25,7 @@ def client(tmp_path: Path, monkeypatch=None) -> TestClient:
             "template_hash": "abc", "provider": "local", "provider_name": "Local Docker",
             "managed_by": "dockerMan",
         }])
+        monkeypatch.setattr("unraid_updater.web.get_containers", lambda *_args: [])
     app = create_app(settings)
     return TestClient(app)
 
@@ -56,7 +57,7 @@ def test_login_and_dashboard_security_headers(tmp_path: Path, monkeypatch) -> No
         assert response.status_code == 200
         assert "Update candidates" in response.text
         assert "1 containers visible" in response.text
-        assert "Local Docker" in response.text
+        assert "Unraid inventory" in response.text
         assert response.headers["x-frame-options"] == "DENY"
         assert "default-src 'self'" in response.headers["content-security-policy"]
 

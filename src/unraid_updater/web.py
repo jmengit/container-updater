@@ -27,10 +27,10 @@ from .docker_runtime import (
     inventory,
     target_repository,
 )
-from .importer import import_latest
-from .portainer import PortainerError
-from .portainer import inventory as portainer_inventory
+from .portainer import target_inventory
 from .scheduler import build_scheduler
+from .wud import WudError, get_containers
+from .wud import scan as scan_wud
 
 ROOT = Path(__file__).parent
 TEMPLATES = Jinja2Templates(directory=ROOT / "templates")
@@ -88,23 +88,40 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     settings.validate_for_server()
     db = Database(settings.database_url)
 
+    def target_inventory_rows() -> list[dict[str, Any]]:
+        if settings.target_type == "unraid":
+            return inventory(
+                settings.docker_socket,
+                settings.self_container_name,
+                Path(settings.docker_template_dir),
+            )
+        return target_inventory(
+            settings.portainer_url,
+            settings.portainer_token,
+            settings.portainer_endpoint_id,
+        )
+
+    def wud_rows() -> list[dict[str, Any]]:
+        return get_containers(
+            settings.wud_url,
+            settings.wud_username,
+            settings.wud_password,
+            settings.wud_verify_tls,
+        )
+
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         db.initialize()
-        if settings.legacy_state_dir and db.latest_scan() is None:
-            import_latest(db, settings.legacy_state_dir)
         scheduler = build_scheduler(
-            db, settings.legacy_state_dir, settings.scan_cron, settings.timezone
+            db, wud_rows, target_inventory_rows, settings.scan_cron, settings.timezone
         )
-        if scheduler:
-            scheduler.start()
+        scheduler.start()
         try:
             yield
         finally:
-            if scheduler:
-                scheduler.shutdown(wait=False)
+            scheduler.shutdown(wait=False)
 
-    app = FastAPI(title="Container Updater", version="0.3.0", lifespan=lifespan)
+    app = FastAPI(title="Container Updater", version="0.4.0", lifespan=lifespan)
     app.state.settings = settings
     app.state.db = db
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=list(settings.trusted_hosts))
@@ -164,30 +181,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if not authenticated(request):
             return RedirectResponse("/login", status_code=303)
         candidates = db.list_candidates()
-        local_error = ""
-        remote_errors: list[str] = []
+        target_error = ""
+        wud_error = ""
         try:
-            local_containers = inventory(
-                settings.docker_socket,
-                settings.self_container_name,
-                Path(settings.docker_template_dir),
-            )
+            target_containers = target_inventory_rows()
         except (OSError, RuntimeError) as exc:
-            local_containers = []
-            local_error = str(exc)
-        remote_containers: list[dict[str, Any]] = []
-        for instance in settings.portainer_instances:
-            try:
-                remote_containers.extend(portainer_inventory(instance))
-            except PortainerError as exc:
-                remote_errors.append(f"{instance.get('name', 'Portainer')}: {exc}")
+            target_containers = []
+            target_error = str(exc)
+        try:
+            watched = wud_rows()
+        except WudError as exc:
+            watched = []
+            wud_error = str(exc)
         return TEMPLATES.TemplateResponse(request, "dashboard.html", {
             "user": require_auth(request), "csrf": csrf_token(request),
             "counts": db.counts(), "latest_scan": db.latest_scan(),
             "candidates": candidates, "mode": settings.app_mode,
-            "local_containers": local_containers, "remote_containers": remote_containers,
-            "local_error": local_error, "remote_errors": remote_errors,
-            "template_ready": Path(settings.docker_template_dir).is_dir(),
+            "target_containers": target_containers, "watched": watched,
+            "target_error": target_error, "wud_error": wud_error,
+            "target_type": settings.target_type,
+            "template_ready": settings.target_type != "unraid" or Path(settings.docker_template_dir).is_dir(),
         })
 
     @app.get("/candidates/{candidate_id}", response_class=HTMLResponse)
@@ -310,19 +323,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/api/v1/fleet")
     def fleet_api(request: Request):
         require_auth(request)
-        local = inventory(
-            settings.docker_socket,
-            settings.self_container_name,
-            Path(settings.docker_template_dir),
-        )
-        remote: list[dict[str, Any]] = []
-        errors: list[str] = []
-        for instance in settings.portainer_instances:
-            try:
-                remote.extend(portainer_inventory(instance))
-            except PortainerError as exc:
-                errors.append(f"{instance.get('name', 'Portainer')}: {exc}")
-        return {"local": local, "remote": remote, "errors": errors}
+        return {"target_type": settings.target_type, "containers": target_inventory_rows(), "wud": wud_rows()}
 
     @app.get("/api/v1/summary")
     def summary(request: Request) -> dict[str, Any]:
@@ -338,7 +339,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def scan(request: Request, csrf: str = Form()):
         actor = require_auth(request)
         check_csrf(request, csrf)
-        result = import_latest(db, settings.legacy_state_dir) if settings.legacy_state_dir else None
+        result = scan_wud(db, wud_rows(), target_inventory_rows(), trigger="manual_wud_api") if settings.legacy_state_dir else None
         db.audit(actor, "scan.requested", "scan", "manual", {"imported": result})
         return RedirectResponse("/", status_code=303)
 

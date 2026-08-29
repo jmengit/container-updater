@@ -1,14 +1,14 @@
 <?xml version="1.0"?>
 <Container version="2">
   <Name>container-updater</Name>
-  <Repository>local/container-updater:0.3.0</Repository>
-  <Registry>https://github.com/jmengit/unraid-container-updater/pkgs/container/unraid-container-updater</Registry>
+  <Repository>local/container-updater:0.4.0</Repository>
+  <Registry>https://github.com/jmengit/container-updater/pkgs/container/container-updater</Registry>
   <Network>bridge</Network>
   <Shell>sh</Shell>
   <Privileged>false</Privileged>
-  <Support>https://github.com/jmengit/unraid-container-updater/issues</Support>
-  <Project>https://github.com/jmengit/unraid-container-updater</Project>
-  <Overview>Authenticated container fleet updater for local Docker/dockerMan and read-only remote Portainer inventory. Local updates are policy-bound and approval-driven; remote mutation remains disabled until stack backup and rollback support is configured.</Overview>
+  <Support>https://github.com/jmengit/container-updater/issues</Support>
+  <Project>https://github.com/jmengit/container-updater</Project>
+  <Overview>Single-machine container updater using that machine's WUD API for update discovery and exactly one native target: local Unraid/dockerMan or one Portainer endpoint.</Overview>
   <Category>Tools: Status:</Category>
   <WebUI>http://[IP]:[PORT:8080]/</WebUI>
   <Icon>https://raw.githubusercontent.com/walkxcode/dashboard-icons/main/png/docker.png</Icon>
@@ -19,7 +19,7 @@
   <Requires>Direct /var/run/docker.sock access is equivalent to host-root authority. Keep the UI LAN-only. Never expose it through a public reverse proxy.</Requires>
   <Config Name="Web UI" Target="8080" Default="8090" Mode="tcp" Description="LAN UI port" Type="Port" Display="always" Required="true" Mask="false">8090</Config>
   <Config Name="Appdata" Target="/data" Default="/mnt/user/appdata/container-updater" Mode="rw" Description="SQLite database and protected Portainer configuration" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/container-updater</Config>
-  <Config Name="Legacy Report State" Target="/legacy-state" Default="/mnt/user/appdata/container-updater/legacy-state" Mode="ro" Description="Reports copied from the existing Hermes updater" Type="Path" Display="advanced" Required="false" Mask="false">/mnt/user/appdata/container-updater/legacy-state</Config>
+
   <Config Name="Docker Socket" Target="/var/run/docker.sock" Default="/var/run/docker.sock" Mode="rw" Description="Docker control socket; grants host-root-equivalent authority" Type="Path" Display="always" Required="true" Mask="false">/var/run/docker.sock</Config>
   <Config Name="dockerMan Templates" Target="/boot/config/plugins/dockerMan/templates-user" Default="/boot/config/plugins/dockerMan/templates-user" Mode="rw" Description="Authoritative native Unraid container templates" Type="Path" Display="always" Required="true" Mask="false">/boot/config/plugins/dockerMan/templates-user</Config>
   <Config Name="Update Backups" Target="/backups" Default="/mnt/user/backups/container-updater" Mode="rw" Description="Template, inspect and rollback audit bundles" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/backups/container-updater</Config>
@@ -34,6 +34,13 @@
   <Config Name="Admin Username" Target="ADMIN_USERNAME" Default="saturn" Description="Dashboard administrator" Type="Variable" Display="always" Required="true" Mask="false">saturn</Config>
   <Config Name="Admin Password" Target="ADMIN_PASSWORD" Default="" Description="At least 12 characters" Type="Variable" Display="always" Required="true" Mask="true"/>
   <Config Name="Session Secret" Target="SESSION_SECRET" Default="" Description="At least 32 random characters" Type="Variable" Display="advanced" Required="true" Mask="true"/>
-  <Config Name="Portainer Instances File" Target="PORTAINER_INSTANCES_FILE" Default="/data/portainer-instances.json" Description="Protected JSON array of Portainer URL/token/endpoint configuration" Type="Variable" Display="advanced" Required="false" Mask="false">/data/portainer-instances.json</Config>
+  <Config Name="Target Type" Target="TARGET_TYPE" Default="unraid" Description="Exactly one target: unraid or portainer" Type="Variable" Display="always" Required="true" Mask="false">unraid</Config>
+  <Config Name="WUD URL" Target="WUD_URL" Default="http://192.168.1.50:3030" Description="WUD REST API for this target machine" Type="Variable" Display="always" Required="true" Mask="false">http://192.168.1.50:3030</Config>
+  <Config Name="WUD Username" Target="WUD_USERNAME" Default="" Description="Optional WUD Basic Auth username" Type="Variable" Display="advanced" Required="false" Mask="false"/>
+  <Config Name="WUD Password" Target="WUD_PASSWORD" Default="" Description="Optional WUD Basic Auth password" Type="Variable" Display="advanced" Required="false" Mask="true"/>
+  <Config Name="WUD Verify TLS" Target="WUD_VERIFY_TLS" Default="true" Description="Verify WUD HTTPS certificate" Type="Variable" Display="advanced" Required="true" Mask="false">true</Config>
+  <Config Name="Portainer URL" Target="PORTAINER_URL" Default="" Description="Required only when Target Type is portainer" Type="Variable" Display="advanced" Required="false" Mask="false"/>
+  <Config Name="Portainer Token" Target="PORTAINER_TOKEN" Default="" Description="Required only when Target Type is portainer" Type="Variable" Display="advanced" Required="false" Mask="true"/>
+  <Config Name="Portainer Endpoint ID" Target="PORTAINER_ENDPOINT_ID" Default="0" Description="Exactly one Portainer endpoint ID" Type="Variable" Display="advanced" Required="false" Mask="false">0</Config>
   <Config Name="Self Container Name" Target="SELF_CONTAINER_NAME" Default="container-updater" Description="Excluded from self-update" Type="Variable" Display="advanced" Required="true" Mask="false">container-updater</Config>
 </Container>

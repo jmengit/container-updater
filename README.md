@@ -1,29 +1,62 @@
-# Unraid Container Updater
+# Container Updater
 
-Private, authenticated, policy-driven dashboard for Saturn's Unraid container update workflow.
+Private, authenticated, approval-driven updater for **one container host per instance**.
 
-## Current release boundary
+Each deployment selects exactly one target:
 
-**v0.2 is approval-driven.** It imports the existing Hermes updater report and uses the Docker socket for bounded inventory and explicitly confirmed, low-risk patch/minor updates. It is never fully automatic: approval, a second typed confirmation, current revision, running state, template identity, and live image must all match immediately before mutation.
+- `TARGET_TYPE=unraid`: local Docker socket inventory plus native Unraid dockerMan templates and recreation.
+- `TARGET_TYPE=portainer`: one Portainer URL and one endpoint ID. Inventory is supported; remote mutation remains blocked until stack backup/revision/rollback is implemented.
 
-## Safety defaults
+A WUD instance associated with that same machine is the sole update-discovery source. Container Updater reads WUD's documented `GET /api/containers` REST endpoint and combines it with live target state. It does not run registry discovery itself and no longer imports legacy Hermes reports.
 
-- `APP_MODE=report_only` remains the default. `approval_driven` requires the exact execution acknowledgment.
-- Only running, explicitly classified, low-risk patch/minor candidates may become approval-ready after soak.
-- Stopped, medium/high/critical, major, pinned, notify-only, breaking-review, unresolved, or flavor-changing cases remain manual.
-- Approval is bound to an exact candidate revision and expires after 24 hours.
-- Web mutations require authentication and CSRF.
-- SQLite audit events are hash chained.
-- Direct Docker socket access is host-root-equivalent. Production runs as root with all capabilities dropped and no host-root mount; keep the UI LAN-only.
-- The updater cannot update itself and never updates or starts a stopped container.
-- The original container is retained under a rollback name until the replacement is running/healthy; dockerMan template and inspect evidence are backed up first.
+## How current vs available is determined
+
+- **Current runtime state:** Docker socket for Unraid, or the configured Portainer endpoint API.
+- **Current/available image metadata:** WUD `/api/containers`, including image tag/digest, `updateAvailable`, `updateKind`, and `result`.
+- **Execution safety:** live image ID, state, and native template revision are revalidated immediately before an approved mutation.
+
+## Safety boundary
+
+- `APP_MODE=report_only` is the default.
+- One instance cannot configure Unraid and Portainer simultaneously.
+- WUD is read-only from Container Updater; it supplies discovery, not execution.
+- Stopped containers are never updated or started.
+- Unlabeled, digest-only, major, medium/high-risk, unresolved, or flavor-changing updates remain manual review.
+- The updater excludes itself.
+- Portainer updates are currently disabled; only inventory and WUD candidate discovery are supported for that target.
+
+## Required configuration
+
+```text
+TARGET_TYPE=unraid|portainer
+WUD_URL=http://wud:3000
+WUD_USERNAME=optional-basic-auth-user
+WUD_PASSWORD_FILE=/run/secrets/wud_password
+```
+
+For Unraid:
+
+```text
+DOCKER_SOCKET=/var/run/docker.sock
+DOCKER_TEMPLATE_DIR=/boot/config/plugins/dockerMan/templates-user
+```
+
+For Portainer:
+
+```text
+PORTAINER_URL=https://portainer.example.com
+PORTAINER_TOKEN_FILE=/run/secrets/portainer_token
+PORTAINER_ENDPOINT_ID=3
+```
 
 ## Local development
 
 ```bash
-uv sync
+uv sync --extra test
 export APP_MODE=report_only
-export DATABASE_URL=sqlite:////tmp/unraid-updater.db
+export TARGET_TYPE=unraid
+export WUD_URL=http://localhost:3000
+export DATABASE_URL=sqlite:////tmp/container-updater.db
 export ADMIN_USERNAME=admin
 export ADMIN_PASSWORD='replace-with-12-plus-chars'
 export SESSION_SECRET='replace-with-32-plus-random-characters'
@@ -32,44 +65,3 @@ uv run uvicorn unraid_updater.main:app --host 127.0.0.1 --port 8080
 ```
 
 Open <http://127.0.0.1:8080>.
-
-To import the existing report history, mount its parent read-only and set:
-
-```bash
-export LEGACY_STATE_DIR=/legacy-state
-```
-
-The app imports the newest `runs/*.json` file at startup, on the configured `SCAN_CRON`, and when an authenticated user selects **Refresh report**.
-
-## Verification
-
-```bash
-uv run ruff check .
-uv run pytest
-uv build
-```
-
-## Container
-
-```bash
-mkdir -p secrets
-openssl rand -base64 24 > secrets/admin_password
-openssl rand -base64 48 > secrets/session_secret
-docker compose up --build
-```
-
-The included compose example uses a read-only root filesystem, drops all Linux capabilities, enables `no-new-privileges`, and mounts only `/data` writable.
-
-## Unraid
-
-Use `unraid/unraid-container-updater.xml`. The optional existing report-state path must be mounted **read-only**. Never add `/var/run/docker.sock` or privileged mode.
-
-See [docs/operations.md](docs/operations.md) for backup, restore, and troubleshooting.
-
-## Roadmap and approval boundary
-
-The constrained host runner and live canary are tracked separately and require explicit Saturn approval plus independent architecture/security review. They are intentionally absent from this repository revision.
-
-## License
-
-Private/internal project. All rights reserved.

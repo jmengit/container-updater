@@ -40,17 +40,17 @@ def test_safe_defaults_are_report_only(monkeypatch: pytest.MonkeyPatch) -> None:
     assert Settings.from_env().app_mode == "report_only"
 
 
-def test_portainer_instances_load_from_protected_file(
-    monkeypatch: pytest.MonkeyPatch, tmp_path
-) -> None:
-    config = tmp_path / "portainer.json"
-    config.write_text('[{"name":"remote","url":"https://host","token":"secret"}]')
-    monkeypatch.setenv("PORTAINER_INSTANCES_FILE", str(config))
-    assert Settings.from_env().portainer_instances[0]["name"] == "remote"
+def test_only_one_supported_target_type() -> None:
+    with pytest.raises(ValueError, match="TARGET_TYPE"):
+        Settings(
+            target_type="unraid,portainer", admin_password="a" * 12,
+            session_secret="x" * 32,
+        ).validate_for_server()
 
 
-def test_optional_portainer_file_may_be_absent(
-    monkeypatch: pytest.MonkeyPatch, tmp_path
-) -> None:
-    monkeypatch.setenv("PORTAINER_INSTANCES_FILE", str(tmp_path / "missing.json"))
-    assert Settings.from_env().portainer_instances == ()
+def test_portainer_target_requires_exactly_one_endpoint() -> None:
+    with pytest.raises(ValueError, match="Portainer target"):
+        Settings(
+            target_type="portainer", admin_password="a" * 12,
+            session_secret="x" * 32,
+        ).validate_for_server()

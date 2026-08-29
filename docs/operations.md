@@ -33,8 +33,8 @@ A filesystem copy while SQLite is actively writing is not a guaranteed consisten
 - **Startup refuses execution mode:** expected; v0.1 only accepts `APP_MODE=report_only`.
 - **Startup rejects password/session secret:** supply at least 12/32 characters respectively.
 - **Invalid host:** add the exact LAN hostname/IP to `TRUSTED_HOSTS`; do not use `*`.
-- **No candidates:** check that `LEGACY_STATE_DIR` contains readable `runs/*.json` files.
-- **Import failure:** the previous successful data remains available; inspect logs and the newest scan error.
+- **No candidates:** verify `WUD_URL`, WUD authentication, and `GET /api/containers` from this instance.
+- **Scan failure:** the previous successful data remains available; inspect logs and the newest WUD scan error.
 - **Approval conflict:** refresh the candidate. Its evidence revision changed, so stale intent was rejected.
 
 ## Security checks
