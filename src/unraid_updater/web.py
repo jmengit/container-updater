@@ -363,6 +363,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             llm_model=settings.llm_model,
             github_token=settings.github_token,
             verify_tls=settings.research_verify_tls,
+            llm_headers=tuple(
+                (name, value) for name, value in (
+                    ("CF-Access-Client-Id", settings.llm_cf_access_client_id),
+                    ("CF-Access-Client-Secret", settings.llm_cf_access_client_secret),
+                ) if value
+            ),
         )
         try:
             report = assess(
