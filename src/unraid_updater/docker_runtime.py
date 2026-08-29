@@ -126,6 +126,7 @@ def inventory(
             "provider": "local",
             "provider_name": "Local Docker",
             "managed_by": "dockerMan" if template else "docker",
+            "labels": dict(attrs.get("Config", {}).get("Labels") or {}),
         })
     return sorted(result, key=lambda row: row["container"].lower())
 

@@ -122,7 +122,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         finally:
             scheduler.shutdown(wait=False)
 
-    app = FastAPI(title="Container Updater", version="0.5.0", lifespan=lifespan)
+    app = FastAPI(title="Container Updater", version="0.6.0", lifespan=lifespan)
     app.state.settings = settings
     app.state.db = db
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=list(settings.trusted_hosts))
@@ -194,6 +194,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except WudError as exc:
             watched = []
             wud_error = str(exc)
+        controls = db.container_controls()
+        candidate_by_name = {row["container_name"]: row for row in candidates}
+        wud_by_name = {str(row.get("name", "")): row for row in watched}
+        policy_rows = []
+        for item in target_containers:
+            name = item["container"]
+            labels = item.get("labels") or (wud_by_name.get(name, {}).get("labels") or {})
+            policy = labels.get("io.jmengit.upgrade.policy")
+            risk = labels.get("io.jmengit.upgrade.risk")
+            candidate = candidate_by_name.get(name)
+            control = controls.get(name, {})
+            research = db.latest_research(candidate["id"]) if candidate else None
+            policy_rows.append({
+                **item, "policy": policy or "missing", "risk": risk or "missing",
+                "labels_missing": not policy or not risk,
+                "candidate": candidate, "paused": bool(control.get("paused")),
+                "pause_reason": control.get("reason", ""), "research": research,
+            })
         return TEMPLATES.TemplateResponse(request, "dashboard.html", {
             "user": require_auth(request), "csrf": csrf_token(request),
             "counts": db.counts(), "latest_scan": db.latest_scan(),
@@ -202,7 +220,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "target_error": target_error, "wud_error": wud_error,
             "target_type": settings.target_type,
             "template_ready": settings.target_type != "unraid" or Path(settings.docker_template_dir).is_dir(),
+            "policy_rows": policy_rows, "research_enabled": settings.research_enabled,
         })
+
+    @app.post("/containers/{container_name}/pause")
+    def pause_container(
+        container_name: str, request: Request, csrf: str = Form(), reason: str = Form(default="")
+    ):
+        actor = require_auth(request)
+        check_csrf(request, csrf)
+        db.set_container_paused(container_name, True, actor, reason)
+        return RedirectResponse("/", status_code=303)
+
+    @app.post("/containers/{container_name}/resume")
+    def resume_container(container_name: str, request: Request, csrf: str = Form()):
+        actor = require_auth(request)
+        check_csrf(request, csrf)
+        db.set_container_paused(container_name, False, actor)
+        return RedirectResponse("/", status_code=303)
 
     @app.get("/candidates/{candidate_id}", response_class=HTMLResponse)
     def candidate_page(request: Request, candidate_id: int):
@@ -239,6 +274,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.post("/candidates/{candidate_id}/approve")
     def approve(request: Request, candidate_id: int, revision: str = Form(), csrf: str = Form()):
+        candidate = db.get_candidate(candidate_id)
+        if candidate and db.container_controls().get(candidate["container_name"], {}).get("paused"):
+            raise HTTPException(status_code=409, detail="container is paused")
         return decide(request, candidate_id, revision, csrf, "approved", "")
 
     @app.post("/candidates/{candidate_id}/defer")
@@ -259,6 +297,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ):
         actor = require_auth(request)
         check_csrf(request, csrf)
+        candidate_for_control = db.get_candidate(candidate_id)
+        if candidate_for_control and db.container_controls().get(
+            candidate_for_control["container_name"], {}
+        ).get("paused"):
+            raise HTTPException(status_code=409, detail="container is paused")
         if settings.app_mode != "approval_driven":
             raise HTTPException(status_code=409, detail="Execution is disabled")
         candidate = db.get_candidate(candidate_id)
