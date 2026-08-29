@@ -50,6 +50,11 @@ CREATE TABLE IF NOT EXISTS research_assessments (
  status TEXT NOT NULL, report_json TEXT NOT NULL DEFAULT '{}',
  error_text TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS container_controls (
+ container_name TEXT PRIMARY KEY, paused INTEGER NOT NULL DEFAULT 0,
+ reason TEXT NOT NULL DEFAULT '', actor TEXT NOT NULL,
+ updated_at TEXT NOT NULL
+);
 CREATE INDEX IF NOT EXISTS idx_candidates_status ON candidates(status);
 CREATE INDEX IF NOT EXISTS idx_approvals_candidate ON approvals(candidate_id, created_at);
 """
@@ -215,6 +220,27 @@ class Database:
         result = dict(row)
         result["report"] = json.loads(result.pop("report_json"))
         return result
+
+    def set_container_paused(
+        self, container_name: str, paused: bool, actor: str, reason: str = ""
+    ) -> None:
+        with self.connect() as connection:
+            connection.execute(
+                """INSERT INTO container_controls(container_name,paused,reason,actor,updated_at)
+                VALUES(?,?,?,?,?) ON CONFLICT(container_name) DO UPDATE SET
+                paused=excluded.paused,reason=excluded.reason,actor=excluded.actor,
+                updated_at=excluded.updated_at""",
+                (container_name, int(paused), reason[:500], actor, utcnow()),
+            )
+        self.audit(
+            actor, "container.paused" if paused else "container.resumed",
+            "container", container_name, {"reason": reason[:500]},
+        )
+
+    def container_controls(self) -> dict[str, dict[str, Any]]:
+        with self.connect() as connection:
+            rows = connection.execute("SELECT * FROM container_controls").fetchall()
+        return {str(row["container_name"]): dict(row) for row in rows}
 
     def start_execution(
         self, candidate_id: int, approval_id: int, revision: str,

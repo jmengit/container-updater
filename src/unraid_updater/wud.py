@@ -53,7 +53,7 @@ def _target_image(current_image: str, remote_tag: str | None) -> str:
 
 
 def normalize(
-    raw: dict[str, Any], live_by_name: dict[str, dict[str, Any]]
+    raw: dict[str, Any], live_by_name: dict[str, dict[str, Any]], paused: bool = False
 ) -> dict[str, Any]:
     """Normalize WUD state while keeping unlabeled/risky updates manual."""
     name = str(raw.get("name") or raw.get("displayName") or "unknown")
@@ -78,6 +78,7 @@ def normalize(
         and policy in {"patch", "minor"}
         and risk == "low"
         and bool(target)
+        and not paused
     )
     reasons: list[str] = []
     if not available:
@@ -92,6 +93,8 @@ def normalize(
         reasons.append(f"risk_{risk}")
     if available and not target:
         reasons.append("digest_or_unresolved_target")
+    if paused:
+        reasons.append("paused_by_user")
     return {
         "container": name,
         "state": str(raw.get("status", live.get("state", "unknown"))),
@@ -104,6 +107,7 @@ def normalize(
         "status": "approval_ready" if eligible else "manual_review",
         "reason_codes": reasons,
         "wud_id": str(raw.get("id", "")),
+        "labels": labels,
     }
 
 
@@ -122,7 +126,10 @@ def scan(
         for raw in containers:
             if raw.get("updateAvailable") is not True:
                 continue
-            item = normalize(raw, live_by_name)
+            item = normalize(
+                raw, live_by_name,
+                bool(db.container_controls().get(str(raw.get("name", "")), {}).get("paused")),
+            )
             db.upsert_candidate(item, scan_id)
             imported += 1
             updates += 1

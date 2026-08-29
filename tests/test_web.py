@@ -55,9 +55,10 @@ def test_login_and_dashboard_security_headers(tmp_path: Path, monkeypatch) -> No
         login(c)
         response = c.get("/")
         assert response.status_code == 200
-        assert "Update candidates" in response.text
-        assert "1 containers visible" in response.text
-        assert "Unraid inventory" in response.text
+        assert "Containers and policy" in response.text
+        assert "Manual intervention queue" in response.text
+        assert "Approval queue" in response.text
+        assert "Example" in response.text
         assert response.headers["x-frame-options"] == "DENY"
         assert "default-src 'self'" in response.headers["content-security-policy"]
 
@@ -88,6 +89,21 @@ def test_research_route_is_disabled_by_default(tmp_path: Path, monkeypatch) -> N
             data={"csrf": token(page.text), "repository": "example/project"},
         )
         assert response.status_code == 503
+
+
+def test_pause_control_is_durable_and_audited(tmp_path: Path, monkeypatch) -> None:
+    with client(tmp_path, monkeypatch) as c:
+        login(c)
+        page = c.get("/")
+        response = c.post(
+            "/containers/Example/pause",
+            data={"csrf": token(page.text), "reason": "maintenance"},
+            follow_redirects=False,
+        )
+        assert response.status_code == 303
+        control = c.app.state.db.container_controls()["Example"]
+        assert control["paused"] == 1
+        assert control["reason"] == "maintenance"
 
 
 def test_login_rejects_bad_csrf(tmp_path: Path) -> None:

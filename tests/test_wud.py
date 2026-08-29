@@ -36,6 +36,12 @@ def test_unlabeled_and_digest_updates_are_manual() -> None:
     assert "digest_or_unresolved_target" in item["reason_codes"]
 
 
+def test_paused_container_is_never_approval_ready() -> None:
+    item = normalize(wud(), {"Example": live()}, paused=True)
+    assert item["status"] == "manual_review"
+    assert "paused_by_user" in item["reason_codes"]
+
+
 def test_only_update_available_rows_become_candidates(tmp_path) -> None:
     from unraid_updater.db import Database
     db = Database(f"sqlite:///{tmp_path / 'wud.db'}"); db.initialize()

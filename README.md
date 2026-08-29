@@ -20,6 +20,8 @@ A WUD instance associated with that same machine is the sole update-discovery so
 - `APP_MODE=report_only` is the default.
 - One instance cannot configure Unraid and Portainer simultaneously.
 - WUD is read-only from Container Updater; it supplies discovery, not execution.
+- WUD may use `wud-socket-proxy` to limit WUD's Docker API exposure instead of giving WUD the host-root-equivalent Docker socket directly. Container Updater itself does not use that proxy; local Unraid execution still requires the real socket for revision verification and approved updates.
+- Unraid upgrades merge with the installed `my-container-updater.xml` and preserve all user-entered Config values—especially Admin Username/Password, WUD credentials, LLM keys, ports, and paths. Never replace the installed template wholesale. Use `scripts/merge_unraid_template.py shipped.xml installed.xml merged.xml` during deployment.
 - Stopped containers are never updated or started.
 - Unlabeled, digest-only, major, medium/high-risk, unresolved, or flavor-changing updates remain manual review.
 - The updater excludes itself.
