@@ -67,3 +67,8 @@ def inventory(instance: dict[str, object]) -> list[dict[str, Any]]:
                 "stack": str(labels.get("com.docker.compose.project", "")),
             })
     return sorted(result, key=lambda row: (row["endpoint_name"].lower(), row["container"].lower()))
+
+
+def target_inventory(url: str, token: str, endpoint_id: int) -> list[dict[str, Any]]:
+    """Inventory exactly one configured Portainer endpoint."""
+    return inventory({"name": "Portainer", "url": url, "token": token, "endpoint_ids": [endpoint_id]})

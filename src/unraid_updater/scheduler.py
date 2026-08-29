@@ -1,4 +1,4 @@
-"""Bounded in-process scheduler for read-only legacy report imports."""
+"""Bounded in-process scheduler for WUD API scans."""
 from __future__ import annotations
 
 import logging
@@ -9,18 +9,18 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from .db import Database
-from .importer import import_latest
+from .wud import scan
 
 LOGGER = logging.getLogger(__name__)
 _LOCK = threading.Lock()
 
 
-def run_import(db: Database, legacy_state_dir: str) -> dict[str, int] | None:
-    """Import once; overlapping invocations are skipped rather than queued."""
-    if not legacy_state_dir or not _LOCK.acquire(blocking=False):
+def run_scan(db: Database, fetch, inventory) -> dict[str, int] | None:
+    """Scan once; overlapping invocations are skipped rather than queued."""
+    if not _LOCK.acquire(blocking=False):
         return None
     try:
-        return import_latest(db, legacy_state_dir)
+        return scan(db, fetch(), inventory())
     except Exception:
         LOGGER.exception("scheduled report import failed")
         return None
@@ -28,24 +28,20 @@ def run_import(db: Database, legacy_state_dir: str) -> dict[str, int] | None:
         _LOCK.release()
 
 
-def build_scheduler(
-    db: Database, legacy_state_dir: str, cron: str, timezone: str
-) -> BackgroundScheduler | None:
-    if not legacy_state_dir:
-        return None
+def build_scheduler(db: Database, fetch, inventory, cron: str, timezone: str) -> BackgroundScheduler:
     fields = cron.split()
     if len(fields) != 5:
         raise ValueError("SCAN_CRON must contain exactly five cron fields")
     minute, hour, day, month, weekday = fields
     scheduler = BackgroundScheduler(timezone=ZoneInfo(timezone), daemon=True)
     scheduler.add_job(
-        run_import,
+        run_scan,
         CronTrigger(
             minute=minute, hour=hour, day=day, month=month, day_of_week=weekday,
             timezone=ZoneInfo(timezone),
         ),
-        args=(db, legacy_state_dir),
-        id="legacy-report-import",
+        args=(db, fetch, inventory),
+        id="wud-api-scan",
         max_instances=1,
         coalesce=True,
         misfire_grace_time=900,

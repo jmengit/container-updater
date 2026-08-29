@@ -1,11 +1,13 @@
 services:
   updater:
     build: .
-    image: ghcr.io/jmengit/unraid-container-updater:latest
+    image: ghcr.io/jmengit/container-updater:latest
     ports:
       - "8080:8080"
     environment:
       APP_MODE: report_only
+      TARGET_TYPE: unraid
+      WUD_URL: http://whats-up-docker:3000
       DATABASE_URL: sqlite:////data/updater.db
       TIMEZONE: America/Chicago
       SCAN_CRON: "45 6 * * *"
@@ -18,6 +20,8 @@ services:
       - session_secret
     volumes:
       - updater-data:/data
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /boot/config/plugins/dockerMan/templates-user:/boot/config/plugins/dockerMan/templates-user:ro
     read_only: true
     tmpfs:
       - /tmp:size=16m,noexec,nosuid,nodev

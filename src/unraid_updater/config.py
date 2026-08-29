@@ -1,7 +1,6 @@
 """Environment-backed application configuration with fail-safe defaults."""
 from __future__ import annotations
 
-import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -19,16 +18,6 @@ def _secret(name: str, default: str = "") -> str:
     return os.getenv(name, default)
 
 
-def _json_secret(name: str) -> tuple[dict[str, object], ...]:
-    raw = _secret(name)
-    if not raw:
-        return ()
-    value = json.loads(raw)
-    if not isinstance(value, list) or not all(isinstance(item, dict) for item in value):
-        raise ValueError(f"{name} must be a JSON array of objects")
-    return tuple(value)
-
-
 @dataclass(frozen=True, slots=True)
 class Settings:
     app_mode: str = "report_only"
@@ -40,14 +29,20 @@ class Settings:
     admin_username: str = "admin"
     admin_password: str = ""
     session_secret: str = ""
-    legacy_state_dir: str = ""
     log_level: str = "INFO"
+    target_type: str = "unraid"
     docker_socket: str = "/var/run/docker.sock"
     docker_template_dir: str = "/boot/config/plugins/dockerMan/templates-user"
     docker_backup_root: str = "/backups"
     self_container_name: str = "container-updater"
     execution_confirmation: str = ""
-    portainer_instances: tuple[dict[str, object], ...] = ()
+    portainer_url: str = ""
+    portainer_token: str = ""
+    portainer_endpoint_id: int = 0
+    wud_url: str = "http://whats-up-docker:3000"
+    wud_username: str = ""
+    wud_password: str = ""
+    wud_verify_tls: bool = True
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -68,8 +63,8 @@ class Settings:
             admin_username=os.getenv("ADMIN_USERNAME", "admin"),
             admin_password=_secret("ADMIN_PASSWORD"),
             session_secret=_secret("SESSION_SECRET"),
-            legacy_state_dir=os.getenv("LEGACY_STATE_DIR", ""),
             log_level=os.getenv("LOG_LEVEL", "INFO"),
+            target_type=os.getenv("TARGET_TYPE", "unraid").lower(),
             docker_socket=os.getenv("DOCKER_SOCKET", "/var/run/docker.sock"),
             docker_template_dir=os.getenv(
                 "DOCKER_TEMPLATE_DIR", "/boot/config/plugins/dockerMan/templates-user"
@@ -79,10 +74,22 @@ class Settings:
                 "SELF_CONTAINER_NAME", "container-updater"
             ),
             execution_confirmation=os.getenv("EXECUTION_CONFIRMATION", ""),
-            portainer_instances=_json_secret("PORTAINER_INSTANCES"),
+            portainer_url=os.getenv("PORTAINER_URL", ""),
+            portainer_token=_secret("PORTAINER_TOKEN"),
+            portainer_endpoint_id=int(os.getenv("PORTAINER_ENDPOINT_ID", "0")),
+            wud_url=os.getenv("WUD_URL", "http://whats-up-docker:3000"),
+            wud_username=os.getenv("WUD_USERNAME", ""),
+            wud_password=_secret("WUD_PASSWORD"),
+            wud_verify_tls=os.getenv("WUD_VERIFY_TLS", "true").lower() == "true",
         )
 
     def validate_for_server(self) -> None:
+        if self.target_type not in {"unraid", "portainer"}:
+            raise ValueError("TARGET_TYPE must be unraid or portainer")
+        if self.target_type == "portainer" and not (
+            self.portainer_url and self.portainer_token and self.portainer_endpoint_id
+        ):
+            raise ValueError("Portainer target requires URL, token, and endpoint ID")
         if len(self.admin_password) < 12:
             raise ValueError("ADMIN_PASSWORD(_FILE) must contain at least 12 characters")
         if len(self.session_secret) < 32:
