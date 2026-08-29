@@ -72,6 +72,24 @@ def test_manual_scan_uses_wud_without_legacy_state(tmp_path: Path, monkeypatch) 
         assert summary["latest_scan"]["trigger"] == "manual_wud_api"
 
 
+def test_research_route_is_disabled_by_default(tmp_path: Path, monkeypatch) -> None:
+    with client(tmp_path, monkeypatch) as c:
+        login(c)
+        db = c.app.state.db
+        import_report(db, {"inventory_count": 1, "candidates": [{
+            "container": "Example", "state": "running", "image": "example/app:1",
+            "current_version": "1", "target": "2", "change_type": "major",
+            "status": "manual_review", "reason_codes": ["major_change"],
+        }]})
+        page = c.get("/")
+        candidate_id = db.list_candidates()[0]["id"]
+        response = c.post(
+            f"/candidates/{candidate_id}/research",
+            data={"csrf": token(page.text), "repository": "example/project"},
+        )
+        assert response.status_code == 503
+
+
 def test_login_rejects_bad_csrf(tmp_path: Path) -> None:
     with client(tmp_path) as c:
         response = c.post("/login", data={"username": "saturn", "password": "bad", "csrf": "bad"})

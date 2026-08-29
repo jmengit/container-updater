@@ -44,6 +44,12 @@ CREATE TABLE IF NOT EXISTS executions (
  started_at TEXT NOT NULL, finished_at TEXT, result_json TEXT NOT NULL DEFAULT '{}',
  error_text TEXT NOT NULL DEFAULT ''
 );
+CREATE TABLE IF NOT EXISTS research_assessments (
+ id INTEGER PRIMARY KEY, candidate_id INTEGER NOT NULL REFERENCES candidates(id),
+ candidate_revision TEXT NOT NULL, repository TEXT NOT NULL,
+ status TEXT NOT NULL, report_json TEXT NOT NULL DEFAULT '{}',
+ error_text TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL
+);
 CREATE INDEX IF NOT EXISTS idx_candidates_status ON candidates(status);
 CREATE INDEX IF NOT EXISTS idx_approvals_candidate ON approvals(candidate_id, created_at);
 """
@@ -185,6 +191,30 @@ class Database:
                 (candidate_id, revision, utcnow()),
             ).fetchone()
         return dict(row) if row else None
+
+    def save_research(
+        self, candidate_id: int, revision: str, repository: str,
+        status: str, report: dict[str, Any], error: str = "",
+    ) -> int:
+        with self.connect() as connection:
+            cursor = connection.execute(
+                """INSERT INTO research_assessments(candidate_id,candidate_revision,
+                repository,status,report_json,error_text,created_at) VALUES(?,?,?,?,?,?,?)""",
+                (candidate_id, revision, repository, status, json.dumps(report), error[:1000], utcnow()),
+            )
+        return int(cursor.lastrowid)
+
+    def latest_research(self, candidate_id: int) -> dict[str, Any] | None:
+        with self.connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM research_assessments WHERE candidate_id=? ORDER BY id DESC LIMIT 1",
+                (candidate_id,),
+            ).fetchone()
+        if not row:
+            return None
+        result = dict(row)
+        result["report"] = json.loads(result.pop("report_json"))
+        return result
 
     def start_execution(
         self, candidate_id: int, approval_id: int, revision: str,

@@ -28,6 +28,7 @@ from .docker_runtime import (
     target_repository,
 )
 from .portainer import target_inventory
+from .research import ResearchConfig, ResearchError, assess
 from .scheduler import build_scheduler
 from .wud import WudError, get_containers
 from .wud import scan as scan_wud
@@ -121,7 +122,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         finally:
             scheduler.shutdown(wait=False)
 
-    app = FastAPI(title="Container Updater", version="0.4.1", lifespan=lifespan)
+    app = FastAPI(title="Container Updater", version="0.5.0", lifespan=lifespan)
     app.state.settings = settings
     app.state.db = db
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=list(settings.trusted_hosts))
@@ -223,6 +224,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return TEMPLATES.TemplateResponse(request, "candidate.html", {
             "candidate": candidate, "csrf": csrf_token(request), "mode": settings.app_mode,
             "live": live, "approval": approval,
+            "research_enabled": settings.research_enabled,
+            "research": db.latest_research(candidate_id),
         })
 
     def decide(request: Request, candidate_id: int, revision: str, csrf: str, decision: str, reason: str):
@@ -342,6 +345,45 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         result = scan_wud(db, wud_rows(), target_inventory_rows(), trigger="manual_wud_api")
         db.audit(actor, "scan.requested", "scan", "manual", {"imported": result})
         return RedirectResponse("/", status_code=303)
+
+    @app.post("/candidates/{candidate_id}/research")
+    def research_candidate(
+        candidate_id: int, request: Request, repository: str = Form(), csrf: str = Form()
+    ):
+        actor = require_auth(request)
+        check_csrf(request, csrf)
+        if not settings.research_enabled:
+            raise HTTPException(status_code=503, detail="research is disabled")
+        candidate = db.get_candidate(candidate_id)
+        if not candidate:
+            raise HTTPException(status_code=404, detail="candidate not found")
+        config = ResearchConfig(
+            llm_base_url=settings.llm_base_url,
+            llm_api_key=settings.llm_api_key,
+            llm_model=settings.llm_model,
+            github_token=settings.github_token,
+            verify_tls=settings.research_verify_tls,
+        )
+        try:
+            report = assess(
+                config, repository, candidate.get("current_version") or "unknown",
+                candidate.get("target") or "unknown",
+            )
+            status_value, error = "success", ""
+        except ResearchError as exc:
+            report, status_value, error = {}, "failed", str(exc)
+        assessment_id = db.save_research(
+            candidate_id, candidate["revision_hash"], repository, status_value, report, error
+        )
+        db.audit(actor, "research.completed", "candidate", str(candidate_id), {
+            "assessment_id": assessment_id, "status": status_value, "repository": repository,
+        })
+        return RedirectResponse(f"/candidates/{candidate_id}", status_code=303)
+
+    @app.get("/api/v1/candidates/{candidate_id}/research")
+    def research_api(candidate_id: int, request: Request):
+        require_auth(request)
+        return {"item": db.latest_research(candidate_id), "advisory_only": True}
 
     @app.exception_handler(HTTPException)
     async def http_error(_: Request, exc: HTTPException):
