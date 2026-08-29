@@ -1,9 +1,15 @@
 from __future__ import annotations
 
+import importlib.util
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-from scripts.merge_unraid_template import merge
+_SCRIPT = Path(__file__).parents[1] / "scripts" / "merge_unraid_template.py"
+_SPEC = importlib.util.spec_from_file_location("merge_unraid_template", _SCRIPT)
+assert _SPEC and _SPEC.loader
+_MODULE = importlib.util.module_from_spec(_SPEC)
+_SPEC.loader.exec_module(_MODULE)
+merge = _MODULE.merge
 
 
 def test_merge_preserves_user_values_and_adds_new_fields(tmp_path: Path) -> None:
