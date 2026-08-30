@@ -135,6 +135,10 @@ class Database:
                 change_type,policy,risk,first_seen_at,soak_days,status,reason_codes_json,
                 revision_hash,last_scan_id,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 ON CONFLICT(revision_hash) DO UPDATE SET last_scan_id=excluded.last_scan_id,
+                state=excluded.state, current_image=excluded.current_image,
+                current_version=excluded.current_version, target=excluded.target,
+                change_type=excluded.change_type, policy=excluded.policy, risk=excluded.risk,
+                first_seen_at=excluded.first_seen_at, soak_days=excluded.soak_days,
                 status=excluded.status, reason_codes_json=excluded.reason_codes_json,
                 updated_at=excluded.updated_at""", values,
             )

@@ -7,7 +7,7 @@ COPY src ./src
 RUN uv sync --frozen --no-dev
 
 FROM python:3.12.11-slim-bookworm
-ARG APP_VERSION=0.6.1
+ARG APP_VERSION=0.6.2
 LABEL org.opencontainers.image.source="https://github.com/jmengit/container-updater" \
       org.opencontainers.image.description="Single-target, WUD-backed container update dashboard" \
       org.opencontainers.image.version="${APP_VERSION}"
