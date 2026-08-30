@@ -9,6 +9,7 @@ from unraid_updater.docker_runtime import (
     find_template,
     replace_template_repository,
     target_repository,
+    template_labels,
 )
 
 
@@ -49,3 +50,15 @@ def test_replace_repository_only(tmp_path: Path) -> None:
     text = path.read_text()
     assert "<Name>app</Name>" in text
     assert "<Repository>example/app:1.0.1</Repository>" in text
+
+
+def test_template_labels_reads_dockerman_extra_params(tmp_path: Path) -> None:
+    path = tmp_path / "my-app.xml"
+    path.write_text(
+        "<Container><ExtraParams>--label io.jmengit.upgrade.policy=patch "
+        "--label=io.jmengit.upgrade.risk=critical</ExtraParams></Container>"
+    )
+    assert template_labels(path) == {
+        "io.jmengit.upgrade.policy": "patch",
+        "io.jmengit.upgrade.risk": "critical",
+    }

@@ -122,7 +122,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         finally:
             scheduler.shutdown(wait=False)
 
-    app = FastAPI(title="Container Updater", version="0.6.0", lifespan=lifespan)
+    app = FastAPI(title="Container Updater", version="0.6.1", lifespan=lifespan)
     app.state.settings = settings
     app.state.db = db
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=list(settings.trusted_hosts))
@@ -221,6 +221,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "target_type": settings.target_type,
             "template_ready": settings.target_type != "unraid" or Path(settings.docker_template_dir).is_dir(),
             "policy_rows": policy_rows, "research_enabled": settings.research_enabled,
+            "research_configured": bool(
+                settings.research_enabled and settings.llm_base_url and settings.llm_model
+            ),
         })
 
     @app.post("/containers/{container_name}/pause")
@@ -261,6 +264,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "live": live, "approval": approval,
             "research_enabled": settings.research_enabled,
             "research": db.latest_research(candidate_id),
+            "research_configured": bool(
+                settings.research_enabled and settings.llm_base_url and settings.llm_model
+            ),
+            "action_state": (
+                "execute" if approval and live else
+                "approve" if candidate["status"] == "approval_ready" else
+                "blocked"
+            ),
         })
 
     def decide(request: Request, candidate_id: int, revision: str, csrf: str, decision: str, reason: str):

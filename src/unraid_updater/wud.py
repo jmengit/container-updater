@@ -62,7 +62,9 @@ def normalize(
     tag = image.get("tag") or {}
     kind = raw.get("updateKind") or {}
     result = raw.get("result") or {}
-    labels = raw.get("labels") or {}
+    # dockerMan template labels are authoritative desired state. WUD may still
+    # expose stale runtime labels until a container has been recreated.
+    labels = {**(raw.get("labels") or {}), **(live.get("labels") or {})}
     change = str(kind.get("semverDiff") or kind.get("kind") or "unknown")
     policy = str(labels.get("io.jmengit.upgrade.policy", "manual"))
     risk = str(labels.get("io.jmengit.upgrade.risk", "medium"))

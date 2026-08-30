@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import shlex
 import shutil
 import time
 from dataclasses import dataclass
@@ -63,6 +64,34 @@ def template_repository(path: Path) -> str:
     return match.group(1).strip()
 
 
+def template_labels(path: Path) -> dict[str, str]:
+    """Read --label values from dockerMan ExtraParams (authoritative desired state)."""
+    text = path.read_text(encoding="utf-8", errors="ignore")
+    match = re.search(r"<ExtraParams>(.*?)</ExtraParams>", text, re.DOTALL)
+    if not match:
+        return {}
+    labels: dict[str, str] = {}
+    try:
+        parts = shlex.split(match.group(1))
+    except ValueError:
+        return {}
+    index = 0
+    while index < len(parts):
+        value = ""
+        if parts[index] == "--label" and index + 1 < len(parts):
+            value = parts[index + 1]
+            index += 2
+        elif parts[index].startswith("--label="):
+            value = parts[index].split("=", 1)[1]
+            index += 1
+        else:
+            index += 1
+        if "=" in value:
+            key, label_value = value.split("=", 1)
+            labels[key] = label_value
+    return labels
+
+
 def replace_template_repository(path: Path, repository: str) -> None:
     text = path.read_text(encoding="utf-8")
     changed, count = re.subn(
@@ -113,8 +142,10 @@ def inventory(
         try:
             template = find_template(name, template_dir)
             template_hash = hashlib.sha256(template.read_bytes()).hexdigest()
+            desired_labels = template_labels(template)
         except ExecutionBlocked:
-            template, template_hash = None, ""
+            template, template_hash, desired_labels = None, "", {}
+        runtime_labels = dict(attrs.get("Config", {}).get("Labels") or {})
         result.append({
             "container": name,
             "state": str(attrs.get("State", {}).get("Status", "unknown")),
@@ -126,7 +157,11 @@ def inventory(
             "provider": "local",
             "provider_name": "Local Docker",
             "managed_by": "dockerMan" if template else "docker",
-            "labels": dict(attrs.get("Config", {}).get("Labels") or {}),
+            "labels": {**runtime_labels, **desired_labels},
+            "runtime_policy_labels_present": all(
+                key in runtime_labels
+                for key in ("io.jmengit.upgrade.policy", "io.jmengit.upgrade.risk")
+            ),
         })
     return sorted(result, key=lambda row: row["container"].lower())
 

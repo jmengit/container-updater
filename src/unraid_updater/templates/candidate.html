@@ -1,1 +1,79 @@
-{% extends "base.html" %}{% block content %}<a href="/" class="back">← Dashboard</a><section class="detail"><p class="eyebrow">{{ candidate.status|replace('_',' ') }}</p><h1>{{ candidate.container_name }}</h1><dl><dt>Installed</dt><dd>{{ candidate.current_image }}</dd><dt>Candidate</dt><dd>{{ candidate.target or 'Unresolved' }}</dd><dt>Change</dt><dd>{{ candidate.change_type }}</dd><dt>Policy / risk</dt><dd>{{ candidate.policy or 'missing' }} / {{ candidate.risk or 'missing' }}</dd><dt>Reasons</dt><dd>{{ candidate.reason_codes|join(', ') or 'All policy gates passed' }}</dd></dl>{% if research_enabled %}<aside class="notice"><strong>Advisory LLM research</strong><form method="post" action="/candidates/{{ candidate.id }}/research"><input type="hidden" name="csrf" value="{{ csrf }}"><label>GitHub repository (owner/name)<input name="repository" required placeholder="diegosouzapw/omniroute"></label><button>Research this exact candidate</button></form>{% if research %}<p>Status: {{ research.status }} · revision-bound: {{ research.candidate_revision == candidate.revision_hash }}</p>{% if research.report.analysis %}<p><strong>{{ research.report.analysis.recommendation }}</strong> · {{ research.report.analysis.risk }} risk · {{ research.report.analysis.confidence }} confidence</p><p>{{ research.report.analysis.summary }}</p><ul>{% for citation in research.report.analysis.citations %}<li><a href="{{ citation.url }}" rel="noreferrer">{{ citation.claim or citation.url }}</a></li>{% endfor %}</ul>{% endif %}{% if research.error_text %}<p>{{ research.error_text }}</p>{% endif %}{% endif %}<small>The LLM cannot approve or execute updates.</small></aside>{% endif %}{% if mode == 'report_only' %}<aside class="notice">Report-only mode: approving records intent and cannot execute an update.</aside>{% else %}<aside class="notice">Approval and execution are separate. Execution revalidates the exact report revision, running state, dockerMan template, and live image before replacing anything. The original container and template are retained for rollback until verification succeeds.</aside>{% endif %}<div class="actions">{% if candidate.status == 'approval_ready' and not approval %}<form method="post" action="/candidates/{{ candidate.id }}/approve"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="revision" value="{{ candidate.revision_hash }}"><button>Approve intent</button></form>{% endif %}{% if mode == 'approval_driven' and approval and live %}<form method="post" action="/candidates/{{ candidate.id }}/execute"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="revision" value="{{ candidate.revision_hash }}"><input type="hidden" name="live_revision" value="{{ live.revision }}"><label>Type <strong>{{ candidate.container_name }}</strong> to confirm<input name="confirm_container" autocomplete="off" required></label><button>Update this container</button></form>{% endif %}<form method="post" action="/candidates/{{ candidate.id }}/defer"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="revision" value="{{ candidate.revision_hash }}"><input name="reason" maxlength="500" placeholder="Optional reason"><button class="secondary">Defer</button></form></div></section>{% endblock %}
+{% extends "base.html" %}
+{% block content %}
+<a href="/" class="back">← Dashboard</a>
+<section class="detail">
+  <p class="eyebrow">{{ candidate.status|replace('_',' ') }}</p>
+  <h1>{{ candidate.container_name }}</h1>
+  <dl>
+    <dt>Installed</dt><dd>{{ candidate.current_image }}</dd>
+    <dt>Candidate</dt><dd>{{ candidate.target or 'Unresolved' }}</dd>
+    <dt>Change</dt><dd>{{ candidate.change_type }}</dd>
+    <dt>Policy / risk</dt><dd>{{ candidate.policy or 'missing' }} / {{ candidate.risk or 'missing' }}</dd>
+    <dt>Reasons</dt><dd>{{ candidate.reason_codes|join(', ') or 'All policy gates passed' }}</dd>
+  </dl>
+
+  {% if research_configured %}
+  <aside class="notice">
+    <strong>Advisory LLM research</strong>
+    <p>Collect bounded GitHub releases, issues, README, changelog, and upgrade documents for this exact candidate, then ask the configured model for a cited risk report.</p>
+    <form method="post" action="/candidates/{{ candidate.id }}/research">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <label>GitHub repository (owner/name)<input name="repository" required placeholder="diegosouzapw/omniroute"></label>
+      <button>Research this exact candidate</button>
+    </form>
+    {% if research %}
+    <p>Status: {{ research.status }} · revision-bound: {{ research.candidate_revision == candidate.revision_hash }}</p>
+    {% if research.report.analysis %}
+    <p><strong>{{ research.report.analysis.recommendation }}</strong> · {{ research.report.analysis.risk }} risk · {{ research.report.analysis.confidence }} confidence</p>
+    <p>{{ research.report.analysis.summary }}</p>
+    <ul>{% for citation in research.report.analysis.citations %}<li><a href="{{ citation.url }}" rel="noreferrer">{{ citation.claim or citation.url }}</a></li>{% endfor %}</ul>
+    {% endif %}
+    {% if research.error_text %}<p>{{ research.error_text }}</p>{% endif %}
+    {% endif %}
+    <small>The LLM cannot approve or execute updates.</small>
+  </aside>
+  {% elif research_enabled %}
+  <aside class="notice bad"><strong>Research configuration is incomplete.</strong> Set the OpenAI-compatible base URL and model before running research.</aside>
+  {% else %}
+  <aside class="notice"><strong>LLM research is off.</strong> Enable it in the Unraid template to research this update.</aside>
+  {% endif %}
+
+  {% if mode == 'report_only' %}
+  <aside class="notice">Report-only mode: approving records intent and cannot execute an update.</aside>
+  {% else %}
+  <aside class="notice">
+    <strong>Next action: {{ action_state|capitalize }}.</strong>
+    {% if action_state == 'blocked' %}This update cannot run until the reasons above are resolved and a new scan marks it approval-ready.
+    {% elif action_state == 'approve' %}Approve this exact revision first. This page will then show the update confirmation control.
+    {% else %}Approval is active. Type the container name below to run the update.{% endif %}
+    Execution revalidates the exact report, running state, dockerMan template, and live image before mutation.
+  </aside>
+  {% endif %}
+
+  <div class="actions">
+    {% if candidate.status == 'approval_ready' and not approval %}
+    <form method="post" action="/candidates/{{ candidate.id }}/approve">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <input type="hidden" name="revision" value="{{ candidate.revision_hash }}">
+      <button>Approve this revision</button>
+    </form>
+    {% endif %}
+    {% if approval %}<p>Approved by {{ approval.actor }} until {{ approval.expires_at }}.</p>{% endif %}
+    {% if approval and live and mode == 'approval_driven' %}
+    <form method="post" action="/candidates/{{ candidate.id }}/execute">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <input type="hidden" name="revision" value="{{ candidate.revision_hash }}">
+      <input type="hidden" name="live_revision" value="{{ live.revision }}">
+      <label>Type <strong>{{ candidate.container_name }}</strong> to confirm<input name="confirm_container" autocomplete="off" required></label>
+      <button>Update this container</button>
+    </form>
+    {% endif %}
+    <form method="post" action="/candidates/{{ candidate.id }}/defer">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <input type="hidden" name="revision" value="{{ candidate.revision_hash }}">
+      <input name="reason" maxlength="500" placeholder="Optional reason">
+      <button class="secondary">Defer</button>
+    </form>
+  </div>
+</section>
+{% endblock %}
