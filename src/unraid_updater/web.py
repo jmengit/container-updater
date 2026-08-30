@@ -27,6 +27,7 @@ from .docker_runtime import (
     inventory,
     target_repository,
 )
+from .policy_config import CHANGES, POLICIES, RISKS, normalized_gates, validate_tags
 from .portainer import target_inventory
 from .research import ResearchConfig, ResearchError, assess
 from .scheduler import build_scheduler
@@ -122,7 +123,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         finally:
             scheduler.shutdown(wait=False)
 
-    app = FastAPI(title="Container Updater", version="0.6.2", lifespan=lifespan)
+    app = FastAPI(title="Container Updater", version="0.7.0", lifespan=lifespan)
     app.state.settings = settings
     app.state.db = db
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=list(settings.trusted_hosts))
@@ -181,7 +182,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def dashboard(request: Request):
         if not authenticated(request):
             return RedirectResponse("/login", status_code=303)
-        candidates = db.list_candidates()
+        candidates = [row for row in db.list_candidates() if row["status"] != "resolved"]
         target_error = ""
         wud_error = ""
         try:
@@ -195,6 +196,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             watched = []
             wud_error = str(exc)
         controls = db.container_controls()
+        overrides = db.policy_overrides()
         candidate_by_name = {row["container_name"]: row for row in candidates}
         wud_by_name = {str(row.get("name", "")): row for row in watched}
         policy_rows = []
@@ -203,12 +205,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             labels = item.get("labels") or (wud_by_name.get(name, {}).get("labels") or {})
             policy = labels.get("io.jmengit.upgrade.policy")
             risk = labels.get("io.jmengit.upgrade.risk")
+            override = overrides.get(name)
+            if override:
+                policy, risk = override["policy"], override["risk"]
             candidate = candidate_by_name.get(name)
             control = controls.get(name, {})
             research = db.latest_research(candidate["id"]) if candidate else None
             policy_rows.append({
                 **item, "policy": policy or "missing", "risk": risk or "missing",
-                "labels_missing": not policy or not risk,
+                "labels_missing": not policy or not risk, "policy_override": bool(override),
                 "candidate": candidate, "paused": bool(control.get("paused")),
                 "pause_reason": control.get("reason", ""), "research": research,
             })
@@ -224,7 +229,82 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "research_configured": bool(
                 settings.research_enabled and settings.llm_base_url and settings.llm_model
             ),
+            "risk_gates": normalized_gates(db.get_setting("risk_gates", {})),
         })
+
+    @app.get("/settings/policies", response_class=HTMLResponse)
+    def policy_settings(request: Request):
+        if not authenticated(request):
+            return RedirectResponse("/login", status_code=303)
+        return TEMPLATES.TemplateResponse(request, "policy_settings.html", {
+            "csrf": csrf_token(request), "mode": settings.app_mode,
+            "containers": target_inventory_rows(), "overrides": db.policy_overrides(),
+            "gates": normalized_gates(db.get_setting("risk_gates", {})),
+            "policies": POLICIES, "risks": RISKS, "changes": CHANGES,
+        })
+
+    @app.post("/settings/policies/container")
+    def save_container_policy(
+        request: Request, container_name: str = Form(), policy: str = Form(),
+        risk: str = Form(), csrf: str = Form(),
+    ):
+        actor = require_auth(request)
+        check_csrf(request, csrf)
+        if container_name not in {row["container"] for row in target_inventory_rows()}:
+            raise HTTPException(status_code=404, detail="container not found")
+        try:
+            validate_tags(policy, risk)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        db.set_policy_override(container_name, policy, risk, actor)
+        try:
+            scan_wud(db, wud_rows(), target_inventory_rows(), trigger="policy_changed")
+        except WudError:
+            pass
+        return RedirectResponse("/settings/policies", status_code=303)
+
+    @app.post("/settings/policies/gates")
+    def save_risk_gates(
+        request: Request, csrf: str = Form(), low_description: str = Form(),
+        medium_description: str = Form(), high_description: str = Form(),
+        critical_description: str = Form(), low_patch: str | None = Form(None),
+        low_minor: str | None = Form(None), low_research: str | None = Form(None),
+        medium_research: str | None = Form(None), high_research: str | None = Form(None),
+        critical_research: str | None = Form(None),
+    ):
+        actor = require_auth(request)
+        check_csrf(request, csrf)
+        descriptions = {"low": low_description, "medium": medium_description,
+                        "high": high_description, "critical": critical_description}
+        research = {"low": low_research, "medium": medium_research,
+                    "high": high_research, "critical": critical_research}
+        value = {}
+        for risk in RISKS:
+            value[risk] = {
+                "description": descriptions[risk],
+                "allowed_changes": (["patch"] if low_patch and risk == "low" else [])
+                + (["minor"] if low_minor and risk == "low" else []),
+                "research_required": bool(research[risk]), "manual_review": risk != "low",
+            }
+        db.set_setting("risk_gates", normalized_gates(value), actor)
+        try:
+            scan_wud(db, wud_rows(), target_inventory_rows(), trigger="risk_gates_changed")
+        except WudError:
+            pass
+        return RedirectResponse("/settings/policies", status_code=303)
+
+    @app.post("/settings/policies/container/reset")
+    def reset_container_policy(
+        request: Request, container_name: str = Form(), csrf: str = Form(),
+    ):
+        actor = require_auth(request)
+        check_csrf(request, csrf)
+        db.remove_policy_override(container_name, actor)
+        try:
+            scan_wud(db, wud_rows(), target_inventory_rows(), trigger="policy_reset")
+        except WudError:
+            pass
+        return RedirectResponse("/settings/policies", status_code=303)
 
     @app.post("/containers/{container_name}/pause")
     def pause_container(

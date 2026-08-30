@@ -64,6 +64,41 @@ def test_login_and_dashboard_security_headers(tmp_path: Path, monkeypatch) -> No
         assert "default-src 'self'" in response.headers["content-security-policy"]
 
 
+def test_policy_settings_can_save_and_reset_override(tmp_path: Path, monkeypatch) -> None:
+    with client(tmp_path, monkeypatch) as c:
+        login(c)
+        page = c.get("/settings/policies")
+        assert page.status_code == 200
+        assert "Container policies" in page.text
+        response = c.post("/settings/policies/container", data={
+            "csrf": token(page.text), "container_name": "Example",
+            "policy": "patch", "risk": "low",
+        }, follow_redirects=False)
+        assert response.status_code == 303
+        assert c.app.state.db.policy_overrides()["Example"]["policy"] == "patch"
+        page = c.get("/settings/policies")
+        response = c.post("/settings/policies/container/reset", data={
+            "csrf": token(page.text), "container_name": "Example",
+        }, follow_redirects=False)
+        assert response.status_code == 303
+        assert "Example" not in c.app.state.db.policy_overrides()
+
+
+def test_medium_gate_cannot_be_weakened(tmp_path: Path, monkeypatch) -> None:
+    with client(tmp_path, monkeypatch) as c:
+        login(c)
+        page = c.get("/settings/policies")
+        response = c.post("/settings/policies/gates", data={
+            "csrf": token(page.text), "low_description": "low",
+            "medium_description": "medium", "high_description": "high",
+            "critical_description": "critical", "low_patch": "on",
+        }, follow_redirects=False)
+        assert response.status_code == 303
+        gates = c.app.state.db.get_setting("risk_gates")
+        assert gates["medium"]["manual_review"] is True
+        assert gates["medium"]["allowed_changes"] == []
+
+
 def test_manual_scan_uses_wud_without_legacy_state(tmp_path: Path, monkeypatch) -> None:
     with client(tmp_path, monkeypatch) as c:
         login(c)

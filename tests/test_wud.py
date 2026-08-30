@@ -55,10 +55,32 @@ def test_paused_container_is_never_approval_ready() -> None:
     assert "paused_by_user" in item["reason_codes"]
 
 
+def test_browser_override_and_gate_control_classification() -> None:
+    item = normalize(
+        wud(policy="manual", risk="medium"), {"Example": live()},
+        override={"policy": "minor", "risk": "low"},
+        gates={"low": {"allowed_changes": ["patch"], "manual_review": False,
+                        "research_required": False}},
+    )
+    assert item["policy"] == "minor"
+    assert item["risk"] == "low"
+    assert item["status"] == "approval_ready"
+
+
+def test_research_gate_prevents_approval_ready() -> None:
+    item = normalize(
+        wud(), {"Example": live()},
+        gates={"low": {"allowed_changes": ["patch"], "manual_review": False,
+                        "research_required": True}},
+    )
+    assert item["status"] == "manual_review"
+    assert "research_required" in item["reason_codes"]
+
+
 def test_only_update_available_rows_become_candidates(tmp_path) -> None:
     from unraid_updater.db import Database
     db = Database(f"sqlite:///{tmp_path / 'wud.db'}"); db.initialize()
     no_update = wud(); no_update["name"] = "Other"; no_update["updateAvailable"] = False
     summary = scan(db, [wud(), no_update], [live()])
-    assert summary == {"imported": 1, "inventory_count": 2, "updates": 1}
+    assert summary == {"imported": 1, "inventory_count": 2, "updates": 1, "resolved": 0}
     assert len(db.list_candidates()) == 1
