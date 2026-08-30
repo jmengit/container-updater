@@ -55,6 +55,14 @@ CREATE TABLE IF NOT EXISTS container_controls (
  reason TEXT NOT NULL DEFAULT '', actor TEXT NOT NULL,
  updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS container_policy_overrides (
+ container_name TEXT PRIMARY KEY, policy TEXT NOT NULL, risk TEXT NOT NULL,
+ actor TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS application_settings (
+ key TEXT PRIMARY KEY, value_json TEXT NOT NULL, actor TEXT NOT NULL,
+ updated_at TEXT NOT NULL
+);
 CREATE INDEX IF NOT EXISTS idx_candidates_status ON candidates(status);
 CREATE INDEX IF NOT EXISTS idx_approvals_candidate ON approvals(candidate_id, created_at);
 """
@@ -245,6 +253,68 @@ class Database:
         with self.connect() as connection:
             rows = connection.execute("SELECT * FROM container_controls").fetchall()
         return {str(row["container_name"]): dict(row) for row in rows}
+
+    def set_policy_override(
+        self, container_name: str, policy: str, risk: str, actor: str
+    ) -> None:
+        with self.connect() as connection:
+            connection.execute(
+                """INSERT INTO container_policy_overrides(container_name,policy,risk,actor,updated_at)
+                VALUES(?,?,?,?,?) ON CONFLICT(container_name) DO UPDATE SET
+                policy=excluded.policy,risk=excluded.risk,actor=excluded.actor,
+                updated_at=excluded.updated_at""",
+                (container_name, policy, risk, actor, utcnow()),
+            )
+        self.audit(actor, "container.policy_changed", "container", container_name, {
+            "policy": policy, "risk": risk,
+        })
+
+    def remove_policy_override(self, container_name: str, actor: str) -> None:
+        with self.connect() as connection:
+            connection.execute(
+                "DELETE FROM container_policy_overrides WHERE container_name=?",
+                (container_name,),
+            )
+        self.audit(actor, "container.policy_override_removed", "container", container_name, {})
+
+    def policy_overrides(self) -> dict[str, dict[str, Any]]:
+        with self.connect() as connection:
+            rows = connection.execute("SELECT * FROM container_policy_overrides").fetchall()
+        return {str(row["container_name"]): dict(row) for row in rows}
+
+    def set_setting(self, key: str, value: Any, actor: str) -> None:
+        with self.connect() as connection:
+            connection.execute(
+                """INSERT INTO application_settings(key,value_json,actor,updated_at)
+                VALUES(?,?,?,?) ON CONFLICT(key) DO UPDATE SET
+                value_json=excluded.value_json,actor=excluded.actor,updated_at=excluded.updated_at""",
+                (key, json.dumps(value, sort_keys=True), actor, utcnow()),
+            )
+        self.audit(actor, "settings.changed", "setting", key, {"value": value})
+
+    def get_setting(self, key: str, default: Any = None) -> Any:
+        with self.connect() as connection:
+            row = connection.execute(
+                "SELECT value_json FROM application_settings WHERE key=?", (key,)
+            ).fetchone()
+        return json.loads(row["value_json"]) if row else default
+
+    def resolve_missing_candidates(self, seen_revisions: set[str]) -> int:
+        """Resolve active candidates absent from a successful authoritative scan."""
+        with self.connect() as connection:
+            if seen_revisions:
+                placeholders = ",".join("?" for _ in seen_revisions)
+                cursor = connection.execute(
+                    f"""UPDATE candidates SET status='resolved',updated_at=?
+                    WHERE status!='resolved' AND revision_hash NOT IN ({placeholders})""",
+                    (utcnow(), *sorted(seen_revisions)),
+                )
+            else:
+                cursor = connection.execute(
+                    "UPDATE candidates SET status='resolved',updated_at=? WHERE status!='resolved'",
+                    (utcnow(),),
+                )
+        return int(cursor.rowcount)
 
     def start_execution(
         self, candidate_id: int, approval_id: int, revision: str,

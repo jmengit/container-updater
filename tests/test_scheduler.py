@@ -25,6 +25,7 @@ def test_wud_scan_persists_empty_snapshot(tmp_path: Path) -> None:
     db.initialize()
     assert run_scan(db, list, list) == {
         "imported": 0, "inventory_count": 0, "updates": 0,
+        "resolved": 0,
     }
     latest = db.latest_scan()
     assert latest is not None

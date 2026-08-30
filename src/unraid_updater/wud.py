@@ -9,6 +9,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from .db import Database
+from .policy_config import normalized_gates
 
 
 class WudError(RuntimeError):
@@ -53,7 +54,8 @@ def _target_image(current_image: str, remote_tag: str | None) -> str:
 
 
 def normalize(
-    raw: dict[str, Any], live_by_name: dict[str, dict[str, Any]], paused: bool = False
+    raw: dict[str, Any], live_by_name: dict[str, dict[str, Any]], paused: bool = False,
+    override: dict[str, Any] | None = None, gates: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Normalize WUD state while keeping unlabeled/risky updates manual."""
     name = str(raw.get("name") or raw.get("displayName") or "unknown")
@@ -66,8 +68,9 @@ def normalize(
     # expose stale runtime labels until a container has been recreated.
     labels = {**(raw.get("labels") or {}), **(live.get("labels") or {})}
     change = str(kind.get("semverDiff") or kind.get("kind") or "unknown")
-    policy = str(labels.get("io.jmengit.upgrade.policy", "manual"))
-    risk = str(labels.get("io.jmengit.upgrade.risk", "medium"))
+    policy = str((override or {}).get("policy") or labels.get("io.jmengit.upgrade.policy", "manual"))
+    risk = str((override or {}).get("risk") or labels.get("io.jmengit.upgrade.risk", "medium"))
+    gate = normalized_gates(gates).get(risk, normalized_gates(gates)["critical"])
     running = str(raw.get("status", live.get("state", "unknown"))) == "running"
     available = raw.get("updateAvailable") is True
     remote_tag = result.get("tag") if kind.get("kind") == "tag" else None
@@ -78,7 +81,9 @@ def normalize(
         and running
         and change in {"patch", "minor"}
         and policy in {"patch", "minor"}
-        and risk == "low"
+        and change in gate["allowed_changes"]
+        and not gate["manual_review"]
+        and not gate["research_required"]
         and bool(target)
         and not paused
     )
@@ -93,6 +98,8 @@ def normalize(
         reasons.append(f"policy_{policy}")
     if risk != "low":
         reasons.append(f"risk_{risk}")
+    if gate["research_required"] and "research_required" not in reasons:
+        reasons.append("research_required")
     if available and not target:
         reasons.append("digest_or_unresolved_target")
     if paused:
@@ -122,6 +129,10 @@ def scan(
     """Persist one WUD snapshot as candidate state."""
     scan_id = db.start_scan(trigger)
     live_by_name = {str(item["container"]): item for item in live}
+    overrides = db.policy_overrides()
+    gates = db.get_setting("risk_gates", {})
+    controls = db.container_controls()
+    seen_revisions: set[str] = set()
     imported = 0
     updates = 0
     try:
@@ -130,12 +141,18 @@ def scan(
                 continue
             item = normalize(
                 raw, live_by_name,
-                bool(db.container_controls().get(str(raw.get("name", "")), {}).get("paused")),
+                bool(controls.get(str(raw.get("name", "")), {}).get("paused")),
+                overrides.get(str(raw.get("name", ""))), gates,
             )
-            db.upsert_candidate(item, scan_id)
+            candidate_id = db.upsert_candidate(item, scan_id)
+            candidate = db.get_candidate(candidate_id)
+            if candidate:
+                seen_revisions.add(candidate["revision_hash"])
             imported += 1
             updates += 1
-        summary = {"imported": imported, "inventory_count": len(containers), "updates": updates}
+        resolved = db.resolve_missing_candidates(seen_revisions)
+        summary = {"imported": imported, "inventory_count": len(containers), "updates": updates,
+                   "resolved": resolved}
         db.finish_scan(scan_id, "success", summary)
         db.audit("system", "scan.wud", "scan", str(scan_id), summary)
         return summary
