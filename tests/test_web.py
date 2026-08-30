@@ -56,6 +56,7 @@ def test_login_and_dashboard_security_headers(tmp_path: Path, monkeypatch) -> No
         response = c.get("/")
         assert response.status_code == 200
         assert "Containers and policy" in response.text
+        assert "LLM research is off" in response.text
         assert "Manual intervention queue" in response.text
         assert "Approval queue" in response.text
         assert "Example" in response.text

@@ -1,11 +1,40 @@
 from __future__ import annotations
 
+import base64
 import json
 from io import BytesIO
 
 import pytest
 
-from unraid_updater.research import ResearchConfig, ResearchError, _repo, analyze
+from unraid_updater.research import (
+    ResearchConfig,
+    ResearchError,
+    _repo,
+    analyze,
+    collect_github_evidence,
+)
+
+
+def test_collection_includes_repository_documents(monkeypatch) -> None:
+    def fake(url, **_kwargs):
+        if url.endswith("/releases?per_page=10"):
+            return []
+        if "search/issues" in url:
+            return {"items": []}
+        if url.endswith("/repos/example/project"):
+            return {"default_branch": "main"}
+        if "/contents/README.md?" in url:
+            return {
+                "type": "file",
+                "html_url": "https://github.com/example/project/blob/main/README.md",
+                "content": base64.b64encode(b"breaking changes").decode(),
+            }
+        raise ResearchError("not found")
+
+    monkeypatch.setattr("unraid_updater.research._request", fake)
+    evidence = collect_github_evidence("example/project", "1", "2")
+    assert evidence["documents"][0]["name"] == "README.md"
+    assert evidence["documents"][0]["content"] == "breaking changes"
 
 
 def test_repository_is_restricted_to_github_owner_name() -> None:

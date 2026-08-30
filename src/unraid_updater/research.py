@@ -1,6 +1,7 @@
 """Bounded GitHub evidence collection and optional advisory-only LLM analysis."""
 from __future__ import annotations
 
+import base64
 import json
 import re
 import ssl
@@ -82,10 +83,29 @@ def collect_github_evidence(repository: str, current: str, candidate: str, *,
         "labels": [label.get("name") for label in row.get("labels", [])],
         "body": (row.get("body") or "")[:6000],
     } for row in issues.get("items", [])[:max_issues]]
+    repo_meta = _request(api, token=token, timeout=timeout)
+    default_branch = str(repo_meta.get("default_branch") or "main")
+    documents = []
+    for filename in ("README.md", "CHANGELOG.md", "CHANGES.md", "HISTORY.md", "UPGRADING.md"):
+        try:
+            row = _request(
+                f"{api}/contents/{filename}?ref={default_branch}", token=token, timeout=timeout
+            )
+        except ResearchError:
+            continue
+        if row.get("type") != "file" or not row.get("content"):
+            continue
+        try:
+            content = base64.b64decode(str(row["content"])).decode(
+                "utf-8", errors="replace"
+            )[:20000]
+        except (ValueError, TypeError):
+            continue
+        documents.append({"name": filename, "url": row.get("html_url"), "content": content})
     return {
         "repository": repo, "current": current, "candidate": candidate,
         "collected_at": datetime.now(UTC).isoformat(), "releases": release_rows,
-        "issues": issue_rows,
+        "issues": issue_rows, "documents": documents,
     }
 
 
@@ -114,7 +134,11 @@ def analyze(config: ResearchConfig, evidence: dict[str, Any]) -> dict[str, Any]:
         result = json.loads(response["choices"][0]["message"]["content"])
     except (KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:
         raise ResearchError("LLM returned invalid structured output") from exc
-    allowed_urls = {row.get("url") for section in ("releases", "issues") for row in evidence.get(section, [])}
+    allowed_urls = {
+        row.get("url")
+        for section in ("releases", "issues", "documents")
+        for row in evidence.get(section, [])
+    }
     citations = result.get("citations", [])
     if not isinstance(citations, list) or any(not isinstance(c, dict) or c.get("url") not in allowed_urls for c in citations):
         raise ResearchError("LLM returned an unsupported citation")

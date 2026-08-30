@@ -27,6 +27,19 @@ def test_wud_tag_candidate_uses_live_repository() -> None:
     assert item["status"] == "approval_ready"
 
 
+def test_template_policy_labels_override_stale_wud_runtime_labels() -> None:
+    raw = wud(policy="manual", risk="medium")
+    local = live()
+    local["labels"] = {
+        "io.jmengit.upgrade.policy": "patch",
+        "io.jmengit.upgrade.risk": "low",
+    }
+    item = normalize(raw, {"Example": local})
+    assert item["policy"] == "patch"
+    assert item["risk"] == "low"
+    assert item["status"] == "approval_ready"
+
+
 def test_unlabeled_and_digest_updates_are_manual() -> None:
     raw = wud(); raw["labels"] = {}; raw["updateKind"] = {
         "kind": "digest", "localValue": "sha256:old", "remoteValue": "sha256:new", "semverDiff": None,
