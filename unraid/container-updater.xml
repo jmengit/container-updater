@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <Container version="2">
   <Name>container-updater</Name>
-  <Repository>local/container-updater:0.6.1</Repository>
+  <Repository>local/container-updater:0.6.2</Repository>
   <Registry>https://github.com/jmengit/container-updater/pkgs/container/container-updater</Registry>
   <Network>bridge</Network>
   <Shell>sh</Shell>

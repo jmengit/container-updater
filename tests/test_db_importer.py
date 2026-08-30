@@ -34,6 +34,17 @@ def test_import_is_idempotent_and_records_scan(tmp_path: Path) -> None:
     assert db.latest_scan()["status"] == "success"
 
 
+def test_rescan_refreshes_policy_for_same_revision(tmp_path: Path) -> None:
+    db = database(tmp_path)
+    payload = report()
+    payload["candidates"][0]["revision_hash"] = "same"
+    payload["candidates"][0]["policy"] = "manual"
+    import_report(db, payload)
+    payload["candidates"][0]["policy"] = "patch"
+    import_report(db, payload)
+    assert db.list_candidates()[0]["policy"] == "patch"
+
+
 def test_approval_is_bound_to_exact_revision(tmp_path: Path) -> None:
     db = database(tmp_path)
     import_report(db, report())
