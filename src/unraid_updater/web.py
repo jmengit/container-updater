@@ -123,7 +123,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         finally:
             scheduler.shutdown(wait=False)
 
-    app = FastAPI(title="Container Updater", version="0.7.0", lifespan=lifespan)
+    app = FastAPI(title="Container Updater", version="0.7.1", lifespan=lifespan)
     app.state.settings = settings
     app.state.db = db
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=list(settings.trusted_hosts))
@@ -470,7 +470,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/api/v1/candidates")
     def candidates_api(request: Request, candidate_status: str | None = None):
         require_auth(request)
-        return {"items": db.list_candidates(candidate_status)}
+        items = db.list_candidates(candidate_status)
+        if candidate_status is None:
+            items = [row for row in items if row["status"] != "resolved"]
+        return {"items": items}
 
     @app.post("/scans")
     def scan(request: Request, csrf: str = Form()):
