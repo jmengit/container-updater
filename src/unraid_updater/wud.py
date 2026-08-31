@@ -10,6 +10,7 @@ from urllib.request import Request, urlopen
 
 from .db import Database
 from .policy_config import normalized_gates
+from .vnext_policy import LabelPolicy, change_class as vnext_change_class
 
 
 class WudError(RuntimeError):
@@ -68,7 +69,14 @@ def normalize(
     # expose stale runtime labels until a container has been recreated.
     labels = {**(raw.get("labels") or {}), **(live.get("labels") or {})}
     change = str(kind.get("semverDiff") or kind.get("kind") or "unknown")
-    policy = str((override or {}).get("policy") or labels.get("io.jmengit.upgrade.policy", "manual"))
+    # vNext labels are authoritative. Invalid or incomplete labels fail closed;
+    # legacy overrides remain accepted only for the v0.7.1 compatibility path.
+    vnext = None
+    try:
+        vnext = LabelPolicy.from_labels(labels)
+    except ValueError:
+        pass
+    policy = vnext.policy.value if vnext else str((override or {}).get("policy") or labels.get("io.jmengit.upgrade.policy", "manual"))
     risk = str((override or {}).get("risk") or labels.get("io.jmengit.upgrade.risk", "medium"))
     gate = normalized_gates(gates).get(risk, normalized_gates(gates)["critical"])
     running = str(raw.get("status", live.get("state", "unknown"))) == "running"
@@ -76,17 +84,22 @@ def normalize(
     remote_tag = result.get("tag") if kind.get("kind") == "tag" else None
     current_image = str(live.get("image") or "")
     target = _target_image(current_image, str(remote_tag) if remote_tag else None)
-    eligible = (
-        available
-        and running
-        and change in {"patch", "minor"}
-        and policy in {"patch", "minor"}
-        and change in gate["allowed_changes"]
-        and not gate["manual_review"]
-        and not gate["research_required"]
-        and bool(target)
-        and not paused
-    )
+    if vnext:
+        change = vnext_change_class(current_image, target)
+        ranks = {"patch": 0, "minor": 1, "major": 2}
+        eligible = (
+            available and running and change in ranks
+            and ranks[change] <= ranks[vnext.version.value]
+            and bool(target) and not paused and vnext.policy.value == "auto"
+        )
+    else:
+        eligible = (
+            available and running and change in {"patch", "minor"}
+            and policy in {"patch", "minor"}
+            and change in gate["allowed_changes"]
+            and not gate["manual_review"] and not gate["research_required"]
+            and bool(target) and not paused
+        )
     reasons: list[str] = []
     if not available:
         reasons.append("no_update")
