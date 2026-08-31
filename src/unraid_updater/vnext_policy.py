@@ -153,4 +153,15 @@ def effective_policy(labels: Mapping[str, Any], global_holds: Mapping[str, int])
     validate_global_holds(global_holds)
     return policy
 
-__all__ = ["LabelPolicy", "HoldDecision", "UpdateVersion", "ExecutionPolicy", "ResearchMode", "hold_decision", "change_class", "validate_global_holds", "effective_policy"]
+
+def resolve_release_metadata(metadata: Mapping[str, Any], *, first_seen_at: datetime | str | None = None,
+                             fallback_enabled: bool = True) -> dict[str, Any]:
+    """Resolve release metadata without treating malformed values as authoritative."""
+    from .resolver.release import resolve_timestamp
+    timestamp = resolve_timestamp(metadata, first_seen_at=first_seen_at,
+                                  fallback_enabled=fallback_enabled)
+    return {"release_at": timestamp.value, "timestamp_confidence": timestamp.confidence,
+            "timestamp_source": timestamp.source, "timestamp_reason": timestamp.reason}
+
+
+__all__ = ["LabelPolicy", "HoldDecision", "UpdateVersion", "ExecutionPolicy", "ResearchMode", "hold_decision", "change_class", "validate_global_holds", "effective_policy", "resolve_release_metadata"]
