@@ -2,6 +2,9 @@
 
 Private, authenticated, approval-driven updater for **one container host per instance**.
 
+> **vNext implementation handoff:** See [`docs/vnext-design-and-implementation.md`](docs/vnext-design-and-implementation.md) for the approved label-driven, headless-first redesign. It intentionally supersedes the v0.7.1 browser-owned policy/risk override model but has not yet been implemented.
+
+
 Each deployment selects exactly one target:
 
 - `TARGET_TYPE=unraid`: local Docker socket inventory plus native Unraid dockerMan templates and recreation.
