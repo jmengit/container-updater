@@ -20,6 +20,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from .config import Settings
 from .db import Database
+from .service import UpdaterService
 from .docker_runtime import (
     ExecutionBlocked,
     execute_update,
@@ -89,6 +90,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings.from_env()
     settings.validate_for_server()
     db = Database(settings.database_url)
+    service = UpdaterService(db)
 
     def target_inventory_rows() -> list[dict[str, Any]]:
         if settings.target_type == "unraid":
@@ -126,6 +128,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app = FastAPI(title="Container Updater", version="0.7.1", lifespan=lifespan)
     app.state.settings = settings
     app.state.db = db
+    app.state.service = service
+
+    @app.get("/api/status")
+    def api_status(request: Request):
+        require_auth(request)
+        return JSONResponse(service.status())
+
+    @app.get("/api/candidates")
+    def api_candidates(request: Request, status_filter: str | None = None):
+        require_auth(request)
+        return JSONResponse(service.candidates(status_filter))
+
+    @app.get("/api/logs")
+    def api_logs(request: Request):
+        require_auth(request)
+        return JSONResponse(service.logs())
+
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=list(settings.trusted_hosts))
     app.add_middleware(
         SessionMiddleware,

@@ -7,14 +7,18 @@ import sys
 from pathlib import Path
 
 from .db import Database
-from .evidence import safe_path
 from .migration import write_policy_export
+from .service import UpdaterService
 
 
 def _db(args: argparse.Namespace) -> Database:
     db = Database(args.database)
     db.initialize()
     return db
+
+
+def _service(args: argparse.Namespace) -> UpdaterService:
+    return UpdaterService(_db(args))
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -36,17 +40,17 @@ def main(argv: list[str] | None = None) -> int:
     if args.command in {"approve", "execute"}:
         print(f"{args.command} is unavailable: no shared service/execution authorization is configured", file=sys.stderr)
         return 2
-    db = _db(args)
+    service = _service(args)
     if args.command == "export-overrides":
-        write_policy_export(db, args.output)
+        write_policy_export(service.db, args.output)
         print(args.output)
         return 0
     if args.command == "status":
-        value = db.latest_scan()
+        value = service.status()
     elif args.command == "candidates":
-        value = db.list_candidates()
+        value = service.candidates()
     else:
-        value = db.audit_rows()
+        value = service.logs()
     print(json.dumps(value, default=str, sort_keys=True, indent=2))
     return 0
 
