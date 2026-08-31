@@ -29,6 +29,7 @@ unraid_updater = ["templates/*.html", "static/*.css"]
 
 [project.scripts]
 container-updater = "unraid_updater.main:run"
+container-updater-cli = "unraid_updater.cli:main"
 
 [tool.pytest.ini_options]
 addopts = "-q"
