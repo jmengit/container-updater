@@ -89,13 +89,17 @@ class HoldDecision:
         return self.eligible_at is None or datetime.now(UTC) >= self.eligible_at
 
 def semver(value: str | None) -> tuple[int, int, int] | None:
+    """Parse a plain semantic version from a tag/image value.
+
+    Build/prerelease identifiers are deliberately not interpreted as release
+    ordering here; callers must resolve them through an authoritative source.
+    """
     if not value:
         return None
-    match = re.search(r"(?<!\d)v?(\d+)\.(\d+)(?:\.(\d+))?", str(value))
+    match = re.fullmatch(r"[vV]?(\d+)\.(\d+)(?:\.(\d+))?(?:[-+][0-9A-Za-z.-]+)?", str(value).strip())
     if not match:
         return None
-    values = tuple(int(x or 0) for x in match.groups())
-    return (values[0], values[1], values[2])
+    return tuple(int(x or 0) for x in match.groups())  # type: ignore[return-value]
 
 def change_class(installed: str | None, target: str | None) -> str:
     current, final = semver(installed), semver(target)
@@ -121,8 +125,11 @@ def hold_decision(*, installed: str | None, target: str | None, line_release_at:
         return HoldDecision(kind, None, None, None, "no update or unclassifiable transition", timestamp_confidence)
     days = override_days if override_days is not None else int(global_holds[kind])
     if not 0 <= days <= 365: raise ValueError("hold days must be between 0 and 365")
-    line = _dt(line_release_at)
-    exact = _dt(target_release_at)
+    try:
+        line = _dt(line_release_at)
+        exact = _dt(target_release_at)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("release timestamps must be valid ISO-8601 values") from exc
     line_deadline = line + timedelta(days=days) if line else None
     exact_deadline = exact + timedelta(days=days) if exact else None
     eligible = max((x for x in (line_deadline, exact_deadline) if x is not None), default=None)
