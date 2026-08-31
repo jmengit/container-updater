@@ -2,7 +2,11 @@
 
 Private, authenticated, approval-driven updater for **one container host per instance**.
 
-> **vNext implementation handoff:** See [`docs/vnext-design-and-implementation.md`](docs/vnext-design-and-implementation.md) for the approved label-driven, headless-first redesign. It intentionally supersedes the v0.7.1 browser-owned policy/risk override model but has not yet been implemented.
+> **vNext implementation handoff:** See [`docs/vnext-design-and-implementation.md`](docs/vnext-design-and-implementation.md) for the approved label-driven, headless-first redesign.
+
+## vNext policy configuration
+
+Per-container policy is stored in Docker/dockerMan labels: `io.jmengit.upgrade.version` (`patch|minor|major`), `io.jmengit.upgrade.policy` (`manual|auto`), and `io.jmengit.upgrade.research` (`none|notes|issues`). Optional labels are `io.jmengit.upgrade.source` and `io.jmengit.upgrade.hold-days` (`0..365`). Global holds use `HOLD_DAYS_PATCH`, `HOLD_DAYS_MINOR`, and `HOLD_DAYS_MAJOR`; manual and automatic policies use the same collision-safe hold calculation.
 
 
 Each deployment selects exactly one target:
