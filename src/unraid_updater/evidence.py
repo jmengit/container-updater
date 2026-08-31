@@ -30,6 +30,8 @@ def safe_path(root: str | Path, relative: str | Path) -> Path:
     candidate = (base / Path(relative)).resolve()
     if candidate != base and base not in candidate.parents:
         raise EvidenceError("evidence path escapes configured root")
+    if candidate.exists() and candidate.is_symlink():
+        raise EvidenceError("evidence path may not be a symlink")
     return candidate
 
 
