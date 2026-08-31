@@ -209,6 +209,11 @@ class Database:
             ).fetchone()
         return dict(row) if row else None
 
+    def audit_rows(self) -> list[dict[str, Any]]:
+        with self.connect() as connection:
+            rows = connection.execute("SELECT * FROM audit_events ORDER BY id DESC").fetchall()
+        return [dict(row) for row in rows]
+
     def save_research(
         self, candidate_id: int, revision: str, repository: str,
         status: str, report: dict[str, Any], error: str = "",

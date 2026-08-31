@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 from .db import Database
+from .evidence import safe_path
 from .migration import write_policy_export
 
 
@@ -45,9 +46,7 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "candidates":
         value = db.list_candidates()
     else:
-        # Durable JSON/JSONL projections are the source for these views; no
-        # mutation or implicit policy lookup is performed by this foundation.
-        value = []
+        value = db.audit_rows()
     print(json.dumps(value, default=str, sort_keys=True, indent=2))
     return 0
 
