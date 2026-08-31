@@ -55,7 +55,9 @@ def check_gate(request: ExecutionRequest) -> GateDecision:
         reasons.append("paused_container")
     if request.self_update:
         reasons.append("self_update")
-    return GateDecision(not reasons, tuple(reasons))
+    if request.candidate_revision and request.live_revision and request.candidate_revision != request.live_revision:
+        reasons.append("stale_revision")
+    return GateDecision(not reasons, tuple(dict.fromkeys(reasons)))
 
 
 # Compatibility aliases make the small pure function easy to discover.
