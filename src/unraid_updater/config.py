@@ -135,5 +135,8 @@ class Settings:
                 raise ValueError("approval_driven mode requires the exact execution confirmation")
             if self.docker_socket != "/var/run/docker.sock":
                 raise ValueError("approval_driven mode requires /var/run/docker.sock")
+        for name, value in (("HOLD_DAYS_PATCH", self.hold_days_patch), ("HOLD_DAYS_MINOR", self.hold_days_minor), ("HOLD_DAYS_MAJOR", self.hold_days_major)):
+            if not 0 <= value <= 365:
+                raise ValueError(f"{name} must be an integer from 0 through 365")
         if not self.trusted_hosts:
             raise ValueError("TRUSTED_HOSTS cannot be empty")
