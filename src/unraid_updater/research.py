@@ -122,7 +122,7 @@ def analyze(config: ResearchConfig, evidence: dict[str, Any]) -> dict[str, Any]:
         + json.dumps(evidence, separators=(",", ":"))[:90000]
     )
     body = {
-        "model": config.llm_model, "temperature": 0,
+        "model": config.llm_model, "temperature": 0, "stream": False,
         "response_format": {"type": "json_object"},
         "messages": [{"role": "user", "content": prompt}],
     }
