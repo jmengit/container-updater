@@ -21,11 +21,13 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from .config import Settings
 from .db import Database
 from .docker_runtime import ExecutionBlocked, inspect_live, inventory
+from .label_edit import LabelEditError, apply_policy_labels, policy_labels
 from .policy_config import CHANGES, POLICIES, RISKS, normalized_gates, validate_tags
 from .portainer import target_inventory
 from .research import ResearchConfig, ResearchError, assess
 from .scheduler import build_scheduler
 from .service import ServiceError, UpdaterService
+from .vnext_policy import LabelPolicy
 from .wud import WudError, get_containers
 from .wud import scan as scan_wud
 
@@ -98,6 +100,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             settings.portainer_endpoint_id,
         )
 
+    def target_container(name: str) -> dict[str, Any]:
+        matches = [row for row in target_inventory_rows() if row["container"] == name]
+        if len(matches) != 1:
+            raise HTTPException(status_code=404, detail="container not found")
+        return matches[0]
+
     def wud_rows() -> list[dict[str, Any]]:
         return get_containers(
             settings.wud_url,
@@ -118,7 +126,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         finally:
             scheduler.shutdown(wait=False)
 
-    app = FastAPI(title="Container Updater", version="0.8.1", lifespan=lifespan)
+    app = FastAPI(title="Container Updater", version="0.8.2", lifespan=lifespan)
     app.state.settings = settings
     app.state.db = db
     app.state.service = service
@@ -220,6 +228,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         for item in target_containers:
             name = item["container"]
             labels = item.get("labels") or (wud_by_name.get(name, {}).get("labels") or {})
+            owned_labels = policy_labels(labels)
             policy = labels.get("io.jmengit.upgrade.policy")
             risk = labels.get("io.jmengit.upgrade.risk")
             override = overrides.get(name)
@@ -230,6 +239,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             research = db.latest_research(candidate["id"]) if candidate else None
             policy_rows.append({
                 **item, "policy": policy or "missing", "risk": risk or "missing",
+                "vnext_labels": owned_labels,
+                "vnext_ready": all(key in owned_labels for key in (
+                    "io.jmengit.upgrade.version", "io.jmengit.upgrade.policy",
+                    "io.jmengit.upgrade.research",
+                )),
                 "labels_missing": not policy or not risk, "policy_override": bool(override),
                 "candidate": candidate, "paused": bool(control.get("paused")),
                 "pause_reason": control.get("reason", ""), "research": research,
@@ -323,6 +337,60 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             pass
         return RedirectResponse("/settings/policies", status_code=303)
 
+    @app.get("/containers/{container_name}/labels", response_class=HTMLResponse)
+    def edit_container_labels(container_name: str, request: Request):
+        if not authenticated(request):
+            return RedirectResponse("/login", status_code=303)
+        if settings.target_type != "unraid":
+            raise HTTPException(status_code=409, detail="native label editing is only available for Unraid")
+        item = target_container(container_name)
+        if item.get("managed_by") != "dockerMan" or not item.get("template_path"):
+            raise HTTPException(status_code=409, detail="container has no unique dockerMan template")
+        return TEMPLATES.TemplateResponse(request, "container_labels.html", {
+            "csrf": csrf_token(request), "mode": settings.app_mode, "container": item,
+            "labels": policy_labels(item.get("labels") or {}),
+            "runtime_synced": bool(item.get("runtime_vnext_labels_synced")),
+        })
+
+    @app.post("/containers/{container_name}/labels")
+    def save_container_labels(
+        container_name: str, request: Request, csrf: str = Form(),
+        version: str = Form(), policy: str = Form(), research: str = Form(),
+        source: str = Form(default=""), hold_days: str = Form(default=""),
+    ):
+        actor = require_auth(request)
+        check_csrf(request, csrf)
+        if settings.target_type != "unraid":
+            raise HTTPException(status_code=409, detail="native label editing is only available for Unraid")
+        item = target_container(container_name)
+        template_path = Path(str(item.get("template_path") or ""))
+        if item.get("managed_by") != "dockerMan" or not item.get("template_path"):
+            raise HTTPException(status_code=409, detail="container has no unique dockerMan template")
+        desired = {
+            "io.jmengit.upgrade.version": version,
+            "io.jmengit.upgrade.policy": policy,
+            "io.jmengit.upgrade.research": research,
+        }
+        if source.strip():
+            desired["io.jmengit.upgrade.source"] = source.strip()
+        if hold_days.strip():
+            desired["io.jmengit.upgrade.hold-days"] = hold_days.strip()
+        try:
+            LabelPolicy.from_labels(desired)
+            apply_policy_labels(
+                template_path, desired, template_root=Path(settings.docker_template_dir), backup=True,
+            )
+        except (ValueError, LabelEditError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        db.audit(actor, "container.labels.updated", "container", container_name, {
+            "labels": desired, "template_path": str(template_path), "runtime_sync_required": True,
+        })
+        try:
+            scan_wud(db, wud_rows(), target_inventory_rows(), trigger="labels_changed")
+        except WudError:
+            pass
+        return RedirectResponse(f"/containers/{container_name}/labels?saved=1", status_code=303)
+
     @app.post("/containers/{container_name}/pause")
     def pause_container(
         container_name: str, request: Request, csrf: str = Form(), reason: str = Form(default="")
@@ -356,10 +424,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 )
             except ExecutionBlocked:
                 live = None
+        source = str((candidate.get("source") or {}).get("url", ""))
+        research_repository = source.removeprefix("https://github.com/").strip("/")
         return TEMPLATES.TemplateResponse(request, "candidate.html", {
             "candidate": candidate, "csrf": csrf_token(request), "mode": settings.app_mode,
-            "live": live, "approval": approval,
+            "live": live, "evidence": live, "approval": approval,
             "research_enabled": settings.research_enabled,
+            "research_repository": research_repository,
             "research": db.latest_research(candidate_id),
             "research_configured": bool(
                 settings.research_enabled and settings.llm_base_url and settings.llm_model

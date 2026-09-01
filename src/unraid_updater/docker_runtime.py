@@ -190,6 +190,8 @@ def inventory(
         except ExecutionBlocked:
             template, template_hash, desired_labels = None, "", {}
         runtime_labels = dict(attrs.get("Config", {}).get("Labels") or {})
+        desired_vnext = {key: desired_labels.get(key) for key in REQUIRED_POLICY_LABELS}
+        runtime_vnext = {key: runtime_labels.get(key) for key in REQUIRED_POLICY_LABELS}
         result.append({
             "container": name,
             "state": str(attrs.get("State", {}).get("Status", "unknown")),
@@ -202,9 +204,11 @@ def inventory(
             "provider_name": "Local Docker",
             "managed_by": "dockerMan" if template else "docker",
             "labels": {**runtime_labels, **desired_labels},
+            "runtime_vnext_labels_synced": (
+                all(desired_vnext.values()) and runtime_vnext == desired_vnext
+            ),
             "runtime_policy_labels_present": all(
-                key in runtime_labels
-                for key in ("io.jmengit.upgrade.policy", "io.jmengit.upgrade.risk")
+                key in runtime_labels for key in REQUIRED_POLICY_LABELS
             ),
         })
     return sorted(result, key=lambda row: row["container"].lower())

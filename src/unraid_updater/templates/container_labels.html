@@ -1,0 +1,20 @@
+{% extends "base.html" %}{% block title %}{{ container.container }} labels · Container Updater{% endblock %}{% block content %}
+<a href="/" class="back">← Dashboard</a>
+<section class="compact-head">
+  <div><p class="eyebrow">Authoritative dockerMan policy</p><h1>{{ container.container }}</h1><p class="mono">{{ container.image }}</p></div>
+  <span class="pill {% if runtime_synced %}ok{% else %}warn{% endif %}">{% if runtime_synced %}runtime synced{% else %}recreation required{% endif %}</span>
+</section>
+{% if request.query_params.get('saved') %}<aside class="notice"><strong>Template labels saved.</strong> Discovery now uses the desired dockerMan labels. The running container must be recreated before execution; this page never recreates it implicitly.</aside>{% endif %}
+<form method="post" class="label-editor">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <div class="form-grid">
+    <label>Maximum version change<select name="version" required>{% for value in ['patch','minor','major'] %}<option value="{{ value }}" {% if labels.get('io.jmengit.upgrade.version') == value %}selected{% endif %}>{{ value }}</option>{% endfor %}</select><small>Largest semantic-version transition this container may accept.</small></label>
+    <label>Execution policy<select name="policy" required>{% for value in ['manual','auto'] %}<option value="{{ value }}" {% if labels.get('io.jmengit.upgrade.policy', 'manual') == value %}selected{% endif %}>{{ value }}</option>{% endfor %}</select><small>Manual requires approval; auto still requires every safety gate.</small></label>
+    <label>Research<select name="research" required>{% for value in ['none','notes','issues'] %}<option value="{{ value }}" {% if labels.get('io.jmengit.upgrade.research', 'none') == value %}selected{% endif %}>{{ value }}</option>{% endfor %}</select><small>Issues includes bounded release-note and regression research.</small></label>
+    <label>Hold override (days)<input name="hold_days" type="number" min="0" max="365" value="{{ labels.get('io.jmengit.upgrade.hold-days','') }}" placeholder="Use global default"><small>Optional; blank uses the global change-class default.</small></label>
+  </div>
+  <label>Source repository<input name="source" type="url" value="{{ labels.get('io.jmengit.upgrade.source','') }}" placeholder="https://github.com/owner/repository"><small>Optional HTTPS GitHub URL for release resolution and research.</small></label>
+  <aside class="notice warn"><strong>Safe desired-state edit:</strong> Save writes only updater-owned labels to this container's dockerMan template and creates an adjacent backup. It preserves ports, paths, environment, image, and unrelated labels. It does not restart the container.</aside>
+  <button type="submit">Save authoritative labels</button>
+</form>
+{% endblock %}
