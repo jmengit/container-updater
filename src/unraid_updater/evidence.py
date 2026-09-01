@@ -6,8 +6,9 @@ import json
 import os
 import re
 import tempfile
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any
 
 _SECRET = re.compile(r"(?i)(password|passwd|secret|token|api[_-]?key|authorization|cookie|credential)")
 
@@ -111,4 +112,4 @@ def verify_audit(root: str | Path, relative: str | Path) -> bool:
     return True
 
 
-__all__ = ["EvidenceError", "safe_root", "safe_path", "redact", "write_json", "append_jsonl", "append_audit", "verify_audit"]
+__all__ = ["EvidenceError", "append_audit", "append_jsonl", "redact", "safe_path", "safe_root", "verify_audit", "write_json"]

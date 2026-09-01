@@ -1,4 +1,3 @@
-from pathlib import Path
 
 from unraid_updater.cli import main
 from unraid_updater.db import Database

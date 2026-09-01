@@ -6,10 +6,17 @@ import re
 import shutil
 import tempfile
 import xml.etree.ElementTree as ET
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
-from .vnext_policy import LABEL_HOLD_DAYS, LABEL_POLICY, LABEL_RESEARCH, LABEL_SOURCE, LABEL_VERSION, LabelPolicy
+from .vnext_policy import (
+    LABEL_HOLD_DAYS,
+    LABEL_POLICY,
+    LABEL_RESEARCH,
+    LABEL_SOURCE,
+    LABEL_VERSION,
+)
 
 LABEL_PREFIX = "io.jmengit.upgrade."
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
@@ -107,4 +114,4 @@ def runtime_labels_match(template_labels: Mapping[str, Any], runtime_labels: Map
     return policy_labels(template_labels) == policy_labels(runtime_labels)
 
 
-__all__ = ["LabelEditError", "validate_container_name", "parse_template_labels", "policy_labels", "policy_diff", "apply_policy_labels", "runtime_labels_match"]
+__all__ = ["LabelEditError", "apply_policy_labels", "parse_template_labels", "policy_diff", "policy_labels", "runtime_labels_match", "validate_container_name"]

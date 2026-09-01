@@ -2,9 +2,10 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, Mapping
+from typing import Any
 
 _SEMVER = re.compile(r"^[vV]?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$")
 _DIGEST = re.compile(r"^sha256:[0-9a-fA-F]{64}$")
@@ -58,7 +59,7 @@ def parse_timestamp(value: Any) -> datetime | None:
         parsed = value
     elif isinstance(value, str):
         try:
-            parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+            parsed = datetime.fromisoformat(value.strip())
         except ValueError as exc:
             raise ResolutionError("timestamp must be valid ISO-8601") from exc
     else:
@@ -102,8 +103,16 @@ def release_identity(*, repository: str, tag: str, digest: str | None = None,
                            timestamp.confidence, match_method)
 
 
-__all__ = ["ResolutionError", "TimestampResult", "ReleaseIdentity", "parse_version",
-           "normalize_digest", "parse_timestamp", "resolve_timestamp", "release_identity"]
+__all__ = [
+    "ReleaseIdentity",
+    "ResolutionError",
+    "TimestampResult",
+    "normalize_digest",
+    "parse_timestamp",
+    "parse_version",
+    "release_identity",
+    "resolve_timestamp",
+]
 
 # Compatibility aliases used by callers that prefer explicit names.
 exact_digest = normalize_digest

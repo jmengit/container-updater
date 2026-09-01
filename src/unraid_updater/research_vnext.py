@@ -6,8 +6,9 @@ this module validates sources and builds the report without making network calls
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from typing import Any, Iterable, Mapping
+from typing import Any
 from urllib.parse import urlparse
 
 from .evidence import redact
@@ -114,4 +115,4 @@ def build_report(
     return report
 
 
-__all__ = ["EvidenceRecord", "MODES", "ResearchValidationError", "build_report", "github_source"]
+__all__ = ["MODES", "EvidenceRecord", "ResearchValidationError", "build_report", "github_source"]

@@ -6,10 +6,11 @@ and the browser can use the same deterministic decisions.
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
-from typing import Any, Mapping
+from typing import Any
 
 LABEL_VERSION = "io.jmengit.upgrade.version"
 LABEL_POLICY = "io.jmengit.upgrade.policy"
@@ -40,7 +41,7 @@ class LabelPolicy:
     hold_days: int | None = None
 
     @classmethod
-    def from_labels(cls, labels: Mapping[str, Any]) -> "LabelPolicy":
+    def from_labels(cls, labels: Mapping[str, Any]) -> LabelPolicy:
         def required(key: str) -> str:
             value = labels.get(key)
             if value is None or not str(value).strip():
@@ -64,7 +65,7 @@ class LabelPolicy:
         return cls(version, policy, research, source, hold)
 
     @classmethod
-    def from_docker_labels(cls, labels: Mapping[str, Any]) -> "LabelPolicy":
+    def from_docker_labels(cls, labels: Mapping[str, Any]) -> LabelPolicy:
         return cls.from_labels(labels)
 
     def as_labels(self) -> dict[str, str]:
@@ -113,7 +114,7 @@ def change_class(installed: str | None, target: str | None) -> str:
 def _dt(value: datetime | str | None) -> datetime | None:
     if value is None: return None
     if isinstance(value, str):
-        value = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        value = datetime.fromisoformat(value)
     return value.astimezone(UTC) if value.tzinfo else value.replace(tzinfo=UTC)
 
 def hold_decision(*, installed: str | None, target: str | None, line_release_at: datetime | str | None,
@@ -164,4 +165,4 @@ def resolve_release_metadata(metadata: Mapping[str, Any], *, first_seen_at: date
             "timestamp_source": timestamp.source, "timestamp_reason": timestamp.reason}
 
 
-__all__ = ["LabelPolicy", "HoldDecision", "UpdateVersion", "ExecutionPolicy", "ResearchMode", "hold_decision", "change_class", "validate_global_holds", "effective_policy", "resolve_release_metadata"]
+__all__ = ["ExecutionPolicy", "HoldDecision", "LabelPolicy", "ResearchMode", "UpdateVersion", "change_class", "effective_policy", "hold_decision", "resolve_release_metadata", "validate_global_holds"]

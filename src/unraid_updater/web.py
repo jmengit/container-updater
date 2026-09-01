@@ -20,25 +20,18 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from .config import Settings
 from .db import Database
-from .service import UpdaterService
-from .docker_runtime import (
-    ExecutionBlocked,
-    execute_update,
-    inspect_live,
-    inventory,
-    target_repository,
-)
+from .docker_runtime import ExecutionBlocked, inspect_live, inventory
 from .policy_config import CHANGES, POLICIES, RISKS, normalized_gates, validate_tags
 from .portainer import target_inventory
 from .research import ResearchConfig, ResearchError, assess
 from .scheduler import build_scheduler
+from .service import ServiceError, UpdaterService
 from .wud import WudError, get_containers
 from .wud import scan as scan_wud
 
 ROOT = Path(__file__).parent
 TEMPLATES = Jinja2Templates(directory=ROOT / "templates")
 PASSWORD_HASHER = PasswordHasher()
-ATTEMPTS: dict[str, deque[float]] = defaultdict(deque)
 
 
 def csrf_token(request: Request) -> str:
@@ -75,22 +68,22 @@ def verify_password(configured: str, supplied: str) -> bool:
     return hmac.compare_digest(configured, supplied)
 
 
-def limited(remote: str) -> bool:
-    now = time.monotonic()
-    queue = ATTEMPTS[remote]
-    while queue and now - queue[0] > 300:
-        queue.popleft()
-    if len(queue) >= 8:
-        return True
-    queue.append(now)
-    return False
-
-
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings.from_env()
     settings.validate_for_server()
     db = Database(settings.database_url)
     service = UpdaterService(db)
+    attempts: dict[str, deque[float]] = defaultdict(deque)
+
+    def limited(remote: str) -> bool:
+        now = time.monotonic()
+        queue = attempts[remote]
+        while queue and now - queue[0] > 300:
+            queue.popleft()
+        if len(queue) >= 8:
+            return True
+        queue.append(now)
+        return False
 
     def target_inventory_rows() -> list[dict[str, Any]]:
         if settings.target_type == "unraid":
@@ -144,6 +137,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def api_logs(request: Request):
         require_auth(request)
         return JSONResponse(service.logs())
+
+    @app.get("/api/audit")
+    def api_audit(request: Request):
+        require_auth(request)
+        return JSONResponse(service.audit())
 
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=list(settings.trusted_hosts))
     app.add_middleware(
@@ -377,17 +375,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         actor = require_auth(request)
         check_csrf(request, csrf)
         try:
-            db.record_decision(candidate_id, revision, decision, actor, reason)
-        except ValueError as exc:
+            service.decide(candidate_id, revision, decision, actor, reason)
+        except (ValueError, ServiceError) as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         return RedirectResponse(f"/candidates/{candidate_id}", status_code=303)
 
     @app.post("/candidates/{candidate_id}/approve")
     def approve(request: Request, candidate_id: int, revision: str = Form(), csrf: str = Form()):
-        candidate = db.get_candidate(candidate_id)
-        if candidate and db.container_controls().get(candidate["container_name"], {}).get("paused"):
+        candidate = service.candidate(candidate_id)
+        if candidate and service.db.container_controls().get(candidate["container_name"], {}).get("paused"):
             raise HTTPException(status_code=409, detail="container is paused")
-        return decide(request, candidate_id, revision, csrf, "approved", "")
+        actor = require_auth(request)
+        check_csrf(request, csrf)
+        try:
+            service.approve(candidate_id, revision, actor)
+        except ServiceError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return RedirectResponse(f"/candidates/{candidate_id}", status_code=303)
 
     @app.post("/candidates/{candidate_id}/defer")
     def defer(
@@ -407,58 +411,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ):
         actor = require_auth(request)
         check_csrf(request, csrf)
-        candidate_for_control = db.get_candidate(candidate_id)
-        if candidate_for_control and db.container_controls().get(
-            candidate_for_control["container_name"], {}
-        ).get("paused"):
-            raise HTTPException(status_code=409, detail="container is paused")
         if settings.app_mode != "approval_driven":
             raise HTTPException(status_code=409, detail="Execution is disabled")
-        candidate = db.get_candidate(candidate_id)
+        candidate = service.candidate(candidate_id)
         if candidate is None:
             raise HTTPException(status_code=404, detail="candidate not found")
-        if candidate["revision_hash"] != revision:
-            raise HTTPException(status_code=409, detail="candidate revision changed")
-        if candidate["status"] != "approval_ready":
-            raise HTTPException(status_code=409, detail="candidate is not approval-ready")
-        if candidate["risk"] != "low" or candidate["change_type"] not in {"patch", "minor"}:
-            raise HTTPException(status_code=409, detail="only low-risk patch/minor execution is allowed")
-        if candidate["state"] != "running":
-            raise HTTPException(status_code=409, detail="stopped containers are never updated")
         if confirm_container != candidate["container_name"]:
             raise HTTPException(status_code=409, detail="container confirmation did not match")
-        approval = db.active_approval(candidate_id, revision)
-        if approval is None:
-            raise HTTPException(status_code=409, detail="a current approval is required")
-        evidence = inspect_live(
-            candidate["container_name"], settings.docker_socket,
-            Path(settings.docker_template_dir),
-        )
-        if evidence.revision != live_revision:
-            raise HTTPException(status_code=409, detail="live evidence changed; review again")
-        target = target_repository(candidate["current_image"], candidate["target"])
-        execution_id = db.start_execution(
-            candidate_id, approval["id"], revision, live_revision, actor
-        )
         try:
-            result = execute_update(
-                name=candidate["container_name"], target_image=target,
-                expected_live_revision=live_revision,
+            service.execute(
+                candidate_id=candidate_id,
+                revision=revision,
+                live_revision=live_revision,
+                actor=actor,
                 socket_path=settings.docker_socket,
                 template_dir=Path(settings.docker_template_dir),
                 backup_root=Path(settings.docker_backup_root),
                 self_name=settings.self_container_name,
             )
-        except (ExecutionBlocked, RuntimeError) as exc:
-            db.finish_execution(execution_id, "failed", {}, str(exc))
-            db.audit(actor, "execution.failed", "candidate", str(candidate_id), {
-                "execution_id": execution_id, "error": str(exc), "target": target
-            })
+        except (ExecutionBlocked, RuntimeError, ServiceError) as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
-        db.finish_execution(execution_id, "succeeded", result)
-        db.audit(actor, "execution.succeeded", "candidate", str(candidate_id), {
-            "execution_id": execution_id, **result
-        })
         return RedirectResponse(f"/candidates/{candidate_id}", status_code=303)
 
     @app.get("/api/v1/health")
