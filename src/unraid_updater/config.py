@@ -6,6 +6,17 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
+def _hold_env(name: str, default: int) -> int:
+    raw = os.getenv(name, str(default))
+    try:
+        value = int(raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be an integer from 0 through 365") from exc
+    if not 0 <= value <= 365:
+        raise ValueError(f"{name} must be an integer from 0 through 365")
+    return value
+
+
 def _secret(name: str, default: str = "") -> str:
     file_value = os.getenv(f"{name}_FILE")
     if file_value:
@@ -49,6 +60,9 @@ class Settings:
     llm_model: str = ""
     github_token: str = ""
     research_verify_tls: bool = True
+    hold_days_patch: int = 2
+    hold_days_minor: int = 7
+    hold_days_major: int = 14
     llm_cf_access_client_id: str = ""
     llm_cf_access_client_secret: str = ""
 
@@ -95,6 +109,9 @@ class Settings:
             llm_model=os.getenv("LLM_MODEL", ""),
             github_token=_secret("GITHUB_TOKEN"),
             research_verify_tls=os.getenv("RESEARCH_VERIFY_TLS", "true").lower() == "true",
+            hold_days_patch=_hold_env("HOLD_DAYS_PATCH", 2),
+            hold_days_minor=_hold_env("HOLD_DAYS_MINOR", 7),
+            hold_days_major=_hold_env("HOLD_DAYS_MAJOR", 14),
             llm_cf_access_client_id=_secret("LLM_CF_ACCESS_CLIENT_ID"),
             llm_cf_access_client_secret=_secret("LLM_CF_ACCESS_CLIENT_SECRET"),
         )
@@ -118,5 +135,8 @@ class Settings:
                 raise ValueError("approval_driven mode requires the exact execution confirmation")
             if self.docker_socket != "/var/run/docker.sock":
                 raise ValueError("approval_driven mode requires /var/run/docker.sock")
+        for name, value in (("HOLD_DAYS_PATCH", self.hold_days_patch), ("HOLD_DAYS_MINOR", self.hold_days_minor), ("HOLD_DAYS_MAJOR", self.hold_days_major)):
+            if not 0 <= value <= 365:
+                raise ValueError(f"{name} must be an integer from 0 through 365")
         if not self.trusted_hosts:
             raise ValueError("TRUSTED_HOSTS cannot be empty")

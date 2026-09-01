@@ -10,8 +10,13 @@ from unraid_updater.importer import import_report
 from unraid_updater.web import create_app
 
 
-def client(tmp_path: Path, monkeypatch=None) -> TestClient:
+def client(tmp_path: Path, monkeypatch=None, *, app_mode: str = "report_only") -> TestClient:
     settings = Settings(
+        app_mode=app_mode,
+        execution_confirmation=(
+            "I_UNDERSTAND_CONTAINER_UPDATES_MUTATE_UNRAID"
+            if app_mode == "approval_driven" else ""
+        ),
         database_url=f"sqlite:///{tmp_path / 'web.db'}",
         admin_username="saturn",
         admin_password="correct horse battery staple",
@@ -48,6 +53,12 @@ def test_health_is_public_and_report_only(tmp_path: Path) -> None:
     with client(tmp_path) as c:
         assert c.get("/api/v1/health").json() == {"status": "ok", "mode": "report_only"}
         assert c.get("/api/v1/summary").status_code == 401
+
+
+def test_service_read_endpoints_require_authentication(tmp_path: Path) -> None:
+    with client(tmp_path) as c:
+        for path in ("/api/status", "/api/candidates", "/api/logs", "/api/audit"):
+            assert c.get(path).status_code in {302, 401}
 
 
 def test_login_and_dashboard_security_headers(tmp_path: Path, monkeypatch) -> None:
@@ -164,6 +175,56 @@ def test_approval_records_intent_but_has_no_execution_route(tmp_path: Path) -> N
         }, follow_redirects=False)
         assert response.status_code == 303
         assert c.post("/api/v1/executions", json={}).status_code == 404
+
+
+def test_execute_route_uses_shared_service_and_enforces_csrf(tmp_path: Path, monkeypatch) -> None:
+    with client(tmp_path, monkeypatch, app_mode="approval_driven") as c:
+        login(c)
+        db = c.app.state.db
+        import_report(db, {"candidates": [{
+            "container": "Example", "state": "running", "image": "example/app:1.0.0",
+            "target": "example/app:1.0.1", "change_type": "patch", "policy": "minor",
+            "risk": "low", "status": "approval_ready",
+        }]})
+        item = db.list_candidates()[0]
+        page = c.get(f"/candidates/{item['id']}")
+        csrf = token(page.text)
+        db.record_decision(item["id"], item["revision_hash"], "approved", "saturn")
+        calls = []
+        monkeypatch.setattr(
+            c.app.state.service,
+            "execute",
+            lambda **kwargs: calls.append(kwargs) or {"status": "succeeded"},
+        )
+        bad = c.post(f"/candidates/{item['id']}/execute", data={
+            "csrf": "bad", "revision": item["revision_hash"], "live_revision": "live-r1",
+            "confirm_container": "Example",
+        })
+        assert bad.status_code == 403
+        response = c.post(f"/candidates/{item['id']}/execute", data={
+            "csrf": csrf, "revision": item["revision_hash"], "live_revision": "live-r1",
+            "confirm_container": "Example",
+        }, follow_redirects=False)
+        assert response.status_code == 303
+        assert calls[0]["candidate_id"] == item["id"]
+
+
+def test_execute_route_rejects_wrong_container_confirmation(tmp_path: Path, monkeypatch) -> None:
+    with client(tmp_path, monkeypatch, app_mode="approval_driven") as c:
+        login(c)
+        db = c.app.state.db
+        import_report(db, {"candidates": [{
+            "container": "Example", "state": "running", "image": "example/app:1.0.0",
+            "target": "example/app:1.0.1", "change_type": "patch", "policy": "minor",
+            "risk": "low", "status": "approval_ready",
+        }]})
+        item = db.list_candidates()[0]
+        page = c.get(f"/candidates/{item['id']}")
+        response = c.post(f"/candidates/{item['id']}/execute", data={
+            "csrf": token(page.text), "revision": item["revision_hash"],
+            "live_revision": "live-r1", "confirm_container": "Wrong",
+        })
+        assert response.status_code == 409
 
 
 def test_stale_revision_returns_conflict(tmp_path: Path) -> None:
