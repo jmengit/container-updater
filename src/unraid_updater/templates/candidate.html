@@ -1,79 +1,19 @@
-{% extends "base.html" %}
-{% block content %}
+{% extends "base.html" %}{% block title %}Review {{ candidate.container_name }} · Container Updater{% endblock %}{% block content %}
 <a href="/" class="back">← Dashboard</a>
-<section class="detail">
-  <p class="eyebrow">{{ candidate.status|replace('_',' ') }}</p>
-  <h1>{{ candidate.container_name }}</h1>
-  <dl>
-    <dt>Installed</dt><dd>{{ candidate.current_image }}</dd>
-    <dt>Candidate</dt><dd>{{ candidate.target or 'Unresolved' }}</dd>
-    <dt>Change</dt><dd>{{ candidate.change_type }}</dd>
-    <dt>Policy / risk</dt><dd>{{ candidate.policy or 'missing' }} / {{ candidate.risk or 'missing' }}</dd>
-    <dt>Reasons</dt><dd>{{ candidate.reason_codes|join(', ') or 'All policy gates passed' }}</dd>
-  </dl>
-
-  {% if research_configured %}
-  <aside class="notice">
-    <strong>Advisory LLM research</strong>
-    <p>Collect bounded GitHub releases, issues, README, changelog, and upgrade documents for this exact candidate, then ask the configured model for a cited risk report.</p>
-    <form method="post" action="/candidates/{{ candidate.id }}/research">
-      <input type="hidden" name="csrf" value="{{ csrf }}">
-      <label>GitHub repository (owner/name)<input name="repository" required placeholder="diegosouzapw/omniroute"></label>
-      <button>Research this exact candidate</button>
-    </form>
-    {% if research %}
-    <p>Status: {{ research.status }} · revision-bound: {{ research.candidate_revision == candidate.revision_hash }}</p>
-    {% if research.report.analysis %}
-    <p><strong>{{ research.report.analysis.recommendation }}</strong> · {{ research.report.analysis.risk }} risk · {{ research.report.analysis.confidence }} confidence</p>
-    <p>{{ research.report.analysis.summary }}</p>
-    <ul>{% for citation in research.report.analysis.citations %}<li><a href="{{ citation.url }}" rel="noreferrer">{{ citation.claim or citation.url }}</a></li>{% endfor %}</ul>
-    {% endif %}
-    {% if research.error_text %}<p>{{ research.error_text }}</p>{% endif %}
-    {% endif %}
-    <small>The LLM cannot approve or execute updates.</small>
-  </aside>
-  {% elif research_enabled %}
-  <aside class="notice bad"><strong>Research configuration is incomplete.</strong> Set the OpenAI-compatible base URL and model before running research.</aside>
-  {% else %}
-  <aside class="notice"><strong>LLM research is off.</strong> Enable it in the Unraid template to research this update.</aside>
-  {% endif %}
-
-  {% if mode == 'report_only' %}
-  <aside class="notice">Report-only mode: approving records intent and cannot execute an update.</aside>
-  {% else %}
-  <aside class="notice">
-    <strong>Next action: {{ action_state|capitalize }}.</strong>
-    {% if action_state == 'blocked' %}This update cannot run until the reasons above are resolved and a new scan marks it approval-ready.
-    {% elif action_state == 'approve' %}Approve this exact revision first. This page will then show the update confirmation control.
-    {% else %}Approval is active. Type the container name below to run the update.{% endif %}
-    Execution revalidates the exact report, running state, dockerMan template, and live image before mutation.
-  </aside>
-  {% endif %}
-
-  <div class="actions">
-    {% if candidate.status == 'approval_ready' and not approval %}
-    <form method="post" action="/candidates/{{ candidate.id }}/approve">
-      <input type="hidden" name="csrf" value="{{ csrf }}">
-      <input type="hidden" name="revision" value="{{ candidate.revision_hash }}">
-      <button>Approve this revision</button>
-    </form>
-    {% endif %}
-    {% if approval %}<p>Approved by {{ approval.actor }} until {{ approval.expires_at }}.</p>{% endif %}
-    {% if approval and live and mode == 'approval_driven' %}
-    <form method="post" action="/candidates/{{ candidate.id }}/execute">
-      <input type="hidden" name="csrf" value="{{ csrf }}">
-      <input type="hidden" name="revision" value="{{ candidate.revision_hash }}">
-      <input type="hidden" name="live_revision" value="{{ live.revision }}">
-      <label>Type <strong>{{ candidate.container_name }}</strong> to confirm<input name="confirm_container" autocomplete="off" required></label>
-      <button>Update this container</button>
-    </form>
-    {% endif %}
-    <form method="post" action="/candidates/{{ candidate.id }}/defer">
-      <input type="hidden" name="csrf" value="{{ csrf }}">
-      <input type="hidden" name="revision" value="{{ candidate.revision_hash }}">
-      <input name="reason" maxlength="500" placeholder="Optional reason">
-      <button class="secondary">Defer</button>
-    </form>
+<section class="compact-head">
+  <div><p class="eyebrow">Candidate #{{ candidate.id }} · revision {{ candidate.revision_hash[:12] }}</p><h1>{{ candidate.container_name }}</h1><p class="mono">{{ candidate.current_version }} → {{ candidate.target }}</p></div>
+  <div class="head-actions"><span class="pill {{ candidate.risk }}">{{ candidate.risk }} risk</span><a class="button secondary" href="/containers/{{ candidate.container_name }}/labels">Edit labels</a></div>
+</section>
+{% if mode == 'report_only' %}<aside class="notice warn"><strong>Report-only mode:</strong> Approve records intent, but execution is disabled. Switch the deployed app mode only after review and canary readiness.</aside>{% endif %}
+<section class="review-layout">
+  <div class="review-main">
+    <section class="summary-strip">
+      <div><small>Change</small><strong>{{ candidate.change_type }}</strong></div><div><small>Policy / risk</small><strong>{{ candidate.policy }} / {{ candidate.risk }}</strong></div><div><small>Status</small><strong>{{ candidate.status|replace('_',' ') }}</strong></div><div><small>Release age</small><strong>{{ candidate.release_age_days if candidate.get('release_age_days') is not none else 'unknown' }}</strong></div>
+    </section>
+    {% if latest_decision %}<aside class="notice"><strong>Latest decision:</strong> {{ latest_decision.decision|upper }} by {{ latest_decision.actor }}{% if latest_decision.reason %} — {{ latest_decision.reason }}{% endif %}</aside>{% endif %}
+    <section class="panel"><h2>Decision</h2><p class="muted">Actions remain visible. If a gate blocks approval, the resulting message explains why.</p><form method="post" action="/candidates/{{ candidate.id }}/approve" class="decision-form"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="revision" value="{{ candidate.revision_hash }}"><button>Approve{% if mode == 'report_only' %} intent{% endif %}</button></form><form method="post" action="/candidates/{{ candidate.id }}/defer" class="decision-form"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="revision" value="{{ candidate.revision_hash }}"><label>Optional defer reason<input name="reason" placeholder="Operational context"></label><button class="secondary">Defer</button></form></section>
+    <section class="panel"><div class="section-title"><h2>Research</h2>{% if research_configured %}<span class="pill ok">LLM connected</span>{% elif research_enabled %}<span class="pill bad">incomplete config</span>{% else %}<span class="pill warn">disabled</span>{% endif %}</div>{% if research_configured %}<form method="post" action="/candidates/{{ candidate.id }}/research" class="compact-form"><input type="hidden" name="csrf" value="{{ csrf }}"><label>GitHub repository<input name="repository" value="{{ research_repository }}" placeholder="owner/repository" required></label><label>Mode<select name="mode"><option value="notes">Release notes</option><option value="issues">Notes + issues</option></select></label><button>Research exact candidate</button></form>{% elif research_enabled %}<p>Research is enabled, but the base URL or model is missing from the deployed container configuration.</p>{% else %}<p>Research is off in the deployed container. Configure OmniRoute in the Unraid template to enable it.</p>{% endif %}{% if research %}<article class="research"><p><strong>{{ research.verdict|upper }}</strong> · confidence {{ research.confidence }} · {{ research.analyzer }}</p><pre>{{ research.summary }}</pre></article>{% endif %}</section>
   </div>
+  <aside class="review-side panel"><h2>Evidence</h2><dl class="compact-dl"><dt>Installed</dt><dd class="mono">{{ candidate.image }}</dd><dt>Candidate</dt><dd class="mono">{{ candidate.target }}</dd><dt>Reasons</dt><dd>{{ candidate.reason_codes|join(', ') }}</dd><dt>First seen</dt><dd>{{ candidate.first_seen_at }}</dd><dt>Last seen</dt><dd>{{ candidate.last_seen_at }}</dd>{% if evidence %}<dt>Live state</dt><dd>{{ evidence.state }}</dd><dt>Template</dt><dd class="mono">{{ evidence.template_path or 'not available' }}</dd>{% endif %}</dl></aside>
 </section>
 {% endblock %}

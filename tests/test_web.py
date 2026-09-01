@@ -120,6 +120,54 @@ def test_manual_scan_uses_wud_without_legacy_state(tmp_path: Path, monkeypatch) 
         assert summary["latest_scan"]["trigger"] == "manual_wud_api"
 
 
+def test_dashboard_exposes_authoritative_label_editor(tmp_path: Path, monkeypatch) -> None:
+    with client(tmp_path, monkeypatch) as c:
+        login(c)
+        page = c.get("/")
+        assert page.status_code == 200
+        assert '/containers/Example/labels' in page.text
+        assert "Edit labels" in page.text
+
+
+def test_container_label_editor_writes_only_owned_labels(tmp_path: Path, monkeypatch) -> None:
+    template = tmp_path / "example.xml"
+    template.write_text(
+        "<Container><Name>Example</Name><Repository>example/app:1</Repository>"
+        "<Labels><Label>custom=value</Label></Labels></Container>"
+    )
+    settings = Settings(
+        app_mode="report_only", database_url=f"sqlite:///{tmp_path / 'labels.db'}",
+        admin_username="saturn", admin_password="correct horse battery staple",
+        session_secret="x" * 48, trusted_hosts=("testserver",),
+        docker_template_dir=str(tmp_path),
+    )
+    item = {
+        "container": "Example", "state": "running", "image": "example/app:1",
+        "image_id": "sha256:1", "health": "healthy", "template_path": str(template),
+        "template_hash": "abc", "provider": "local", "provider_name": "Local Docker",
+        "managed_by": "dockerMan", "labels": {"custom": "value"},
+        "runtime_vnext_labels_synced": False,
+    }
+    monkeypatch.setattr("unraid_updater.web.inventory", lambda *_args: [item])
+    monkeypatch.setattr("unraid_updater.web.get_containers", lambda *_args: [])
+    with TestClient(create_app(settings)) as c:
+        login(c)
+        page = c.get("/containers/Example/labels")
+        assert page.status_code == 200
+        response = c.post("/containers/Example/labels", data={
+            "csrf": token(page.text), "version": "minor", "policy": "manual",
+            "research": "issues", "source": "https://github.com/example/app",
+            "hold_days": "7",
+        }, follow_redirects=False)
+        assert response.status_code == 303
+        text = template.read_text()
+        assert "custom=value" in text
+        assert "io.jmengit.upgrade.version=minor" in text
+        assert "io.jmengit.upgrade.policy=manual" in text
+        assert "io.jmengit.upgrade.research=issues" in text
+        assert template.with_suffix(".xml.bak").exists()
+
+
 def test_research_route_is_disabled_by_default(tmp_path: Path, monkeypatch) -> None:
     with client(tmp_path, monkeypatch) as c:
         login(c)
