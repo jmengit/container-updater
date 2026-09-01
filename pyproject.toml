@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "container-updater"
-version = "0.7.1"
+version = "0.8.0"
 description = "Approval-driven local Docker and remote Portainer update dashboard"
 requires-python = ">=3.11"
 dependencies = [
@@ -29,6 +29,7 @@ unraid_updater = ["templates/*.html", "static/*.css"]
 
 [project.scripts]
 container-updater = "unraid_updater.main:run"
+container-updater-cli = "unraid_updater.cli:main"
 
 [tool.pytest.ini_options]
 addopts = "-q"

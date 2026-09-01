@@ -9,7 +9,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from .db import Database
-from .wud import scan
+from .service import UpdaterService
 
 LOGGER = logging.getLogger(__name__)
 _LOCK = threading.Lock()
@@ -20,7 +20,13 @@ def run_scan(db: Database, fetch, inventory) -> dict[str, int] | None:
     if not _LOCK.acquire(blocking=False):
         return None
     try:
-        return scan(db, fetch(), inventory())
+        result = UpdaterService(db).reconcile_rows(fetch(), inventory(), trigger="wud_api")
+        return {
+            "imported": result["imported"],
+            "inventory_count": result["inventory_count"],
+            "updates": result["imported"],
+            "resolved": result["resolved"],
+        }
     except Exception:
         LOGGER.exception("scheduled report import failed")
         return None

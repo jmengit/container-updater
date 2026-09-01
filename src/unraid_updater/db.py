@@ -65,6 +65,7 @@ CREATE TABLE IF NOT EXISTS application_settings (
 );
 CREATE INDEX IF NOT EXISTS idx_candidates_status ON candidates(status);
 CREATE INDEX IF NOT EXISTS idx_approvals_candidate ON approvals(candidate_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_candidates_container ON candidates(container_name, updated_at);
 """
 
 
@@ -209,6 +210,11 @@ class Database:
             ).fetchone()
         return dict(row) if row else None
 
+    def audit_rows(self) -> list[dict[str, Any]]:
+        with self.connect() as connection:
+            rows = connection.execute("SELECT * FROM audit_events ORDER BY id DESC").fetchall()
+        return [dict(row) for row in rows]
+
     def save_research(
         self, candidate_id: int, revision: str, repository: str,
         status: str, report: dict[str, Any], error: str = "",
@@ -306,7 +312,7 @@ class Database:
                 placeholders = ",".join("?" for _ in seen_revisions)
                 cursor = connection.execute(
                     f"""UPDATE candidates SET status='resolved',updated_at=?
-                    WHERE status!='resolved' AND revision_hash NOT IN ({placeholders})""",
+                    WHERE status NOT IN ('resolved','superseded') AND revision_hash NOT IN ({placeholders})""",
                     (utcnow(), *sorted(seen_revisions)),
                 )
             else:
@@ -374,3 +380,14 @@ class Database:
                 "SELECT status, COUNT(*) count FROM candidates GROUP BY status"
             ).fetchall()
         return {row["status"]: int(row["count"]) for row in rows}
+
+    def supersede_older_candidates(self, container_name: str, newest_revision: str) -> int:
+        """Mark older active revisions for one container as superseded."""
+        with self.connect() as connection:
+            cursor = connection.execute(
+                """UPDATE candidates SET status='superseded', updated_at=?
+                WHERE container_name=? AND revision_hash != ?
+                AND status NOT IN ('resolved','superseded','succeeded')""",
+                (utcnow(), container_name, newest_revision),
+            )
+        return int(cursor.rowcount)
