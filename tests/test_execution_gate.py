@@ -1,10 +1,27 @@
 from datetime import UTC, datetime, timedelta
-import sqlite3
-from unraid_updater.execution_gate import ExecutionRequest, check_gate, acquire_lease, release_lease, record_operation, get_operation
+
+from unraid_updater.execution_gate import (
+    ExecutionRequest,
+    acquire_lease,
+    check_gate,
+    get_operation,
+    record_operation,
+    release_lease,
+)
+
 
 def req(**kw):
-    d = dict(container_name="app", candidate_revision="r1", live_revision="r1", approval_id=1, approval_revision="r1", target="image:2", running=True)
-    d.update(kw); return ExecutionRequest(**d)
+    d = {
+        "container_name": "app",
+        "candidate_revision": "r1",
+        "live_revision": "r1",
+        "approval_id": 1,
+        "approval_revision": "r1",
+        "target": "image:2",
+        "running": True,
+    }
+    d.update(kw)
+    return ExecutionRequest(**d)
 
 def test_gate_fail_closed_reasons():
     d=check_gate(ExecutionRequest(container_name="", candidate_revision="", live_revision="", target=None))
@@ -12,8 +29,11 @@ def test_gate_fail_closed_reasons():
     assert {"missing_approval","stale_revision","not_running","unresolved_target"} <= set(d.reasons)
 
 def test_gate_rejects_each_safety_condition():
-    for field in ("approval_id","approval_revision","running","target","hold_active","paused","self_update"):
-        kw={field: None if field in {"approval_id","approval_revision","target"} else (False if field=="running" else True)}
+    for field in ("approval_id","approval_revision","live_revision","running","target","hold_active","paused","self_update"):
+        if field in {"approval_id", "approval_revision", "live_revision", "target"}:
+            kw = {field: None}
+        else:
+            kw = {field: field != "running"}
         assert not check_gate(req(**kw)).allowed
 
 def test_atomic_lease_and_idempotency(tmp_path):

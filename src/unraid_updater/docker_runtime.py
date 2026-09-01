@@ -3,20 +3,36 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import shlex
 import shutil
 import time
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-import docker
-from docker.errors import DockerException, NotFound
+try:  # Keep the offline/template helpers importable without the Docker SDK.
+    import docker
+    from docker.errors import DockerException, NotFound
+except ModuleNotFoundError:  # pragma: no cover - exercised by minimal/offline installs
+    docker = None  # type: ignore[assignment]
+
+    class DockerException(Exception):
+        """Fallback used when the optional Docker SDK is not installed."""
+
+    class NotFound(DockerException):
+        """Fallback Docker not-found exception."""
+
+from .label_edit import runtime_labels_match
+from .label_edit import validate_container_name as _validate_label_container_name
+from .vnext_policy import LABEL_POLICY, LABEL_RESEARCH, LABEL_VERSION
 
 TEMPLATE_DIR = Path("/boot/config/plugins/dockerMan/templates-user")
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
+REQUIRED_POLICY_LABELS = (LABEL_VERSION, LABEL_POLICY, LABEL_RESEARCH)
 
 
 class ExecutionBlocked(RuntimeError):
@@ -42,15 +58,23 @@ class LiveEvidence:
 
 
 def client_from_socket(socket_path: str = "/var/run/docker.sock"):
+    if docker is None:
+        raise ExecutionBlocked("Docker SDK is not installed")
     return docker.DockerClient(base_url=f"unix://{socket_path}", timeout=180)
 
 
 def find_template(name: str, template_dir: Path = TEMPLATE_DIR) -> Path:
-    if not NAME_RE.fullmatch(name):
+    try:
+        _validate_label_container_name(name)
+    except ValueError:
         raise ExecutionBlocked("invalid container name")
+    root = template_dir.resolve()
+    if not root.exists() or not root.is_dir():
+        raise ExecutionBlocked("dockerMan template directory is unavailable")
     matches = [
         path for path in template_dir.glob("*.xml")
-        if f"<Name>{name}</Name>" in path.read_text(encoding="utf-8", errors="ignore")
+        if path.is_file() and path.resolve().parent == root
+        and f"<Name>{name}</Name>" in path.read_text(encoding="utf-8", errors="ignore")
     ]
     if len(matches) != 1:
         raise ExecutionBlocked(f"expected one dockerMan template for {name}, found {len(matches)}")
@@ -58,23 +82,32 @@ def find_template(name: str, template_dir: Path = TEMPLATE_DIR) -> Path:
 
 
 def template_repository(path: Path) -> str:
-    match = re.search(r"<Repository>(.*?)</Repository>", path.read_text(encoding="utf-8"), re.DOTALL)
-    if not match:
+    try:
+        root = ET.parse(path).getroot()
+    except (OSError, ET.ParseError) as exc:
+        raise ExecutionBlocked("invalid dockerMan template XML") from exc
+    repositories = [node.text.strip() for node in root.iter("Repository") if node.text and node.text.strip()]
+    if len(repositories) != 1:
         raise ExecutionBlocked("dockerMan template has no Repository")
-    return match.group(1).strip()
+    return repositories[0]
 
 
 def template_labels(path: Path) -> dict[str, str]:
-    """Read --label values from dockerMan ExtraParams (authoritative desired state)."""
-    text = path.read_text(encoding="utf-8", errors="ignore")
-    match = re.search(r"<ExtraParams>(.*?)</ExtraParams>", text, re.DOTALL)
-    if not match:
-        return {}
-    labels: dict[str, str] = {}
+    """Read labels from dockerMan XML and ExtraParams (desired state)."""
     try:
-        parts = shlex.split(match.group(1))
+        root = ET.parse(path).getroot()
+    except (OSError, ET.ParseError) as exc:
+        raise ExecutionBlocked("invalid dockerMan template XML") from exc
+    labels: dict[str, str] = {}
+    for node in root.iter("Label"):
+        if node.text and "=" in node.text:
+            key, value = node.text.split("=", 1)
+            labels[key.strip()] = value.strip()
+    params = next((node.text or "" for node in root.iter("ExtraParams")), "")
+    try:
+        parts = shlex.split(params)
     except ValueError:
-        return {}
+        raise ExecutionBlocked("invalid dockerMan ExtraParams")
     index = 0
     while index < len(parts):
         value = ""
@@ -93,14 +126,25 @@ def template_labels(path: Path) -> dict[str, str]:
 
 
 def replace_template_repository(path: Path, repository: str) -> None:
-    text = path.read_text(encoding="utf-8")
-    changed, count = re.subn(
-        r"<Repository>.*?</Repository>",
-        f"<Repository>{repository}</Repository>", text, count=1, flags=re.DOTALL,
-    )
-    if count != 1:
+    try:
+        tree = ET.parse(path)
+    except (OSError, ET.ParseError) as exc:
+        raise ExecutionBlocked("invalid dockerMan template XML") from exc
+    nodes = list(tree.getroot().iter("Repository"))
+    if len(nodes) != 1 or not repository or "<" in repository or ">" in repository:
         raise ExecutionBlocked("could not update dockerMan Repository")
-    path.write_text(changed, encoding="utf-8")
+    backup = path.with_suffix(path.suffix + ".bak")
+    shutil.copy2(path, backup)
+    nodes[0].text = repository
+    temporary = path.with_name(f".{path.name}.tmp")
+    try:
+        with temporary.open("wb") as handle:
+            tree.write(handle, encoding="utf-8", xml_declaration=True)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def inspect_live(
@@ -178,18 +222,33 @@ def target_repository(current_image: str, candidate: str) -> str:
 
 def backup_evidence(evidence: LiveEvidence, backup_root: Path, attrs: dict[str, Any]) -> Path:
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    backup_root = backup_root.expanduser().resolve()
+    backup_root.mkdir(parents=True, mode=0o700, exist_ok=True)
     backup = backup_root / f"{stamp}-{evidence.name}"
-    backup.mkdir(parents=True, mode=0o700)
+    backup.mkdir(parents=False, mode=0o700)
     shutil.copy2(evidence.template_path, backup / "template.xml")
+    config = dict(attrs.get("Config") or {})
+    config.pop("Env", None)
+    sanitized = {
+        "Config": config,
+        "HostConfig": attrs.get("HostConfig") or {},
+        "NetworkSettings": {"Networks": (attrs.get("NetworkSettings") or {}).get("Networks") or {}},
+        "Image": attrs.get("Image", ""),
+        "Name": attrs.get("Name", ""),
+        "State": attrs.get("State") or {},
+    }
     (backup / "inspect.json").write_text(
-        json.dumps(attrs, indent=2, sort_keys=True), encoding="utf-8"
+        json.dumps(sanitized, indent=2, sort_keys=True, default=str), encoding="utf-8"
     )
-    (backup / "manifest.json").write_text(json.dumps({
+    manifest = {
         "created_at": datetime.now(UTC).isoformat(), "name": evidence.name,
         "image": evidence.image, "image_id": evidence.image_id,
         "template_path": str(evidence.template_path),
         "template_hash": evidence.template_hash,
-    }, indent=2, sort_keys=True), encoding="utf-8")
+    }
+    (backup / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
+    digest = hashlib.sha256(json.dumps(manifest, sort_keys=True).encode()).hexdigest()
+    (backup / "manifest.sha256").write_text(f"{digest}  manifest.json\n", encoding="ascii")
     return backup
 
 
@@ -219,8 +278,18 @@ def execute_update(
     socket_path: str, template_dir: Path, backup_root: Path, self_name: str,
 ) -> dict[str, Any]:
     """Pull, recreate, verify, and retain instant rollback until success."""
+    try:
+        _validate_label_container_name(name)
+    except ValueError as exc:
+        raise ExecutionBlocked("invalid container name") from exc
+    try:
+        _validate_label_container_name(self_name)
+    except ValueError as exc:
+        raise ExecutionBlocked("invalid configured self container name") from exc
     if name == self_name:
         raise ExecutionBlocked("self-update is forbidden")
+    if not target_image or any(char in target_image for char in "\r\n<>"):
+        raise ExecutionBlocked("invalid target image")
     evidence = inspect_live(name, socket_path, template_dir)
     if evidence.state != "running":
         raise ExecutionBlocked("stopped containers are never updated or started")
@@ -228,11 +297,16 @@ def execute_update(
         raise ExecutionBlocked("live evidence changed after confirmation")
     if target_image == evidence.image:
         raise ExecutionBlocked("target image equals current image")
-
+    desired_labels = template_labels(evidence.template_path)
+    if any(key not in desired_labels for key in REQUIRED_POLICY_LABELS):
+        raise ExecutionBlocked("dockerMan template is missing required vNext policy labels")
     client = client_from_socket(socket_path)
     old = client.containers.get(name)
     old.reload()
     attrs = old.attrs
+    runtime_labels = dict(attrs.get("Config", {}).get("Labels") or {})
+    if not runtime_labels_match(desired_labels, runtime_labels):
+        raise ExecutionBlocked("running container policy labels differ from dockerMan template")
     backup = backup_evidence(evidence, backup_root, attrs)
     rollback_name = f"{name}.updater-rollback-{int(time.time())}"
     created = None
@@ -247,6 +321,10 @@ def execute_update(
         replace_template_repository(evidence.template_path, target_image)
         response = client.api.create_container_from_config(config, name=name)
         created = client.containers.get(response["Id"])
+        created.reload()
+        created_labels = dict(created.attrs.get("Config", {}).get("Labels") or {})
+        if not runtime_labels_match(desired_labels, created_labels):
+            raise ExecutionBlocked("recreated container policy labels do not match template")
         created.start()
         after: dict[str, Any] = {}
         for _ in range(12):
@@ -257,11 +335,14 @@ def execute_update(
             time.sleep(5)
         else:
             raise RuntimeError("replacement did not become running/healthy within 60 seconds")
+        after_image_id = str(after.get("Image", ""))
+        if after_image_id != str(target_id):
+            raise RuntimeError("replacement image identity does not match pulled target")
         old.remove(force=True)
         return {
             "status": "succeeded", "backup_dir": str(backup),
             "before_image_id": evidence.image_id,
-            "after_image_id": str(after.get("Image", "")),
+            "after_image_id": after_image_id,
             "target_image": target_image,
         }
     except Exception as exc:

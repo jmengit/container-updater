@@ -29,7 +29,7 @@ def test_parse_and_apply_preserves_unrelated_xml(tmp_path: Path) -> None:
 
 
 def test_diff_is_scoped_and_parity_is_policy_scoped() -> None:
-    assert set(policy_diff({"custom": "a", **LABELS}, {"custom": "b", **{**LABELS, "io.jmengit.upgrade.version": "major"}})) == {"io.jmengit.upgrade.version"}
+    assert set(policy_diff({"custom": "a", **LABELS}, {"custom": "b", **LABELS, "io.jmengit.upgrade.version": "major"})) == {"io.jmengit.upgrade.version"}
     assert runtime_labels_match({**LABELS, "custom": "a"}, {**LABELS, "custom": "b"})
 
 

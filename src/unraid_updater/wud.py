@@ -10,7 +10,8 @@ from urllib.request import Request, urlopen
 
 from .db import Database
 from .policy_config import normalized_gates
-from .vnext_policy import LabelPolicy, change_class as vnext_change_class
+from .vnext_policy import LabelPolicy
+from .vnext_policy import change_class as vnext_change_class
 
 
 class WudError(RuntimeError):
@@ -72,10 +73,15 @@ def normalize(
     # vNext labels are authoritative. Invalid or incomplete labels fail closed;
     # legacy overrides remain accepted only for the v0.7.1 compatibility path.
     vnext = None
+    policy_error = ""
     try:
         vnext = LabelPolicy.from_labels(labels)
-    except ValueError:
-        pass
+    except ValueError as exc:
+        policy_error = str(exc)
+    has_vnext_labels = any(
+        key in labels
+        for key in ("io.jmengit.upgrade.version", "io.jmengit.upgrade.research")
+    )
     policy = vnext.policy.value if vnext else str((override or {}).get("policy") or labels.get("io.jmengit.upgrade.policy", "manual"))
     risk = str((override or {}).get("risk") or labels.get("io.jmengit.upgrade.risk", "medium"))
     gate = normalized_gates(gates).get(risk, normalized_gates(gates)["critical"])
@@ -92,6 +98,10 @@ def normalize(
             and ranks[change] <= ranks[vnext.version.value]
             and bool(target) and not paused and vnext.policy.value == "auto"
         )
+    elif has_vnext_labels:
+        eligible = False
+        policy = "invalid"
+        risk = "critical"
     else:
         eligible = (
             available and running and change in {"patch", "minor"}
@@ -101,6 +111,8 @@ def normalize(
             and bool(target) and not paused
         )
     reasons: list[str] = []
+    if policy_error and has_vnext_labels:
+        reasons.append("invalid_vnext_labels")
     if not available:
         reasons.append("no_update")
     if not running:

@@ -13,7 +13,16 @@ from .release import (
 )
 
 __all__ = [
-    "best", "flavor", "same_flavor", "ReleaseIdentity", "ResolutionError",
-    "TimestampResult", "change_class", "normalize_digest", "parse_timestamp",
-    "parse_version", "release_identity", "resolve_timestamp",
+    "ReleaseIdentity",
+    "ResolutionError",
+    "TimestampResult",
+    "best",
+    "change_class",
+    "flavor",
+    "normalize_digest",
+    "parse_timestamp",
+    "parse_version",
+    "release_identity",
+    "resolve_timestamp",
+    "same_flavor",
 ]

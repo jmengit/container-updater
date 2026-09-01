@@ -2,7 +2,13 @@ import json
 
 import pytest
 
-from unraid_updater.evidence import EvidenceError, append_audit, append_jsonl, verify_audit, write_json
+from unraid_updater.evidence import (
+    EvidenceError,
+    append_audit,
+    append_jsonl,
+    verify_audit,
+    write_json,
+)
 
 
 def test_json_is_redacted_and_atomic(tmp_path):

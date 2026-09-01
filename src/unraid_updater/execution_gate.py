@@ -1,10 +1,11 @@
 """Fail-closed execution authorization and SQLite-backed operation leases."""
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
 import sqlite3
-from typing import Any, Mapping
+from collections.abc import Mapping
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -38,7 +39,9 @@ def check_gate(request: ExecutionRequest) -> GateDecision:
     """Evaluate all execution preconditions without side effects.
 
     Missing or malformed evidence is a denial; callers must provide an explicit
-    approval and a revision that matches both the candidate and live state.
+    approval bound to the candidate revision and an explicit live-state revision.
+    The candidate and live revisions cover different evidence and therefore are
+    not expected to be equal; the runtime re-inspects and matches the latter.
     """
     reasons: list[str] = []
     if request.approval_id is None:
@@ -55,7 +58,7 @@ def check_gate(request: ExecutionRequest) -> GateDecision:
         reasons.append("paused_container")
     if request.self_update:
         reasons.append("self_update")
-    if request.candidate_revision and request.live_revision and request.candidate_revision != request.live_revision:
+    if not request.live_revision:
         reasons.append("stale_revision")
     return GateDecision(not reasons, tuple(dict.fromkeys(reasons)))
 
