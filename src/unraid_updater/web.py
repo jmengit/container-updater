@@ -32,7 +32,6 @@ from .portainer import target_inventory
 from .research import ResearchConfig, ResearchError, assess
 from .scheduler import build_scheduler
 from .service import ServiceError, UpdaterService
-from .vnext_policy import LabelPolicy
 from .wud import WudError, get_containers
 from .wud import scan as scan_wud
 
