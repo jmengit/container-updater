@@ -4,17 +4,19 @@
   <div><p class="eyebrow">Authoritative dockerMan policy</p><h1>{{ container.container }}</h1><p class="mono">{{ container.image }}</p></div>
   <span class="pill {% if runtime_synced %}ok{% else %}warn{% endif %}">{% if runtime_synced %}runtime synced{% else %}recreation required{% endif %}</span>
 </section>
-{% if request.query_params.get('saved') %}<aside class="notice"><strong>Template labels saved.</strong> Discovery now uses the desired dockerMan labels. The running container must be recreated before execution; this page never recreates it implicitly.</aside>{% endif %}
+{% if request.query_params.get('saved') %}<aside class="notice"><strong>Deployable template labels saved.</strong> They are now written as <code>--label</code> arguments in dockerMan Extra Parameters. Open Unraid Docker → {{ container.container }} → Edit → Apply to recreate the container without changing its image. A restart alone cannot change labels.</aside>{% endif %}
 <form method="post" class="label-editor">
   <input type="hidden" name="csrf" value="{{ csrf }}">
   <div class="form-grid">
     <label>Maximum version change<select name="version" required>{% for value in ['patch','minor','major'] %}<option value="{{ value }}" {% if labels.get('io.jmengit.upgrade.version') == value %}selected{% endif %}>{{ value }}</option>{% endfor %}</select><small>Largest semantic-version transition this container may accept.</small></label>
     <label>Execution policy<select name="policy" required>{% for value in ['manual','auto'] %}<option value="{{ value }}" {% if labels.get('io.jmengit.upgrade.policy', 'manual') == value %}selected{% endif %}>{{ value }}</option>{% endfor %}</select><small>Manual requires approval; auto still requires every safety gate.</small></label>
-    <label>Research<select name="research" required>{% for value in ['none','notes','issues'] %}<option value="{{ value }}" {% if labels.get('io.jmengit.upgrade.research', 'none') == value %}selected{% endif %}>{{ value }}</option>{% endfor %}</select><small>Issues includes bounded release-note and regression research.</small></label>
+    <label>Research<select name="research" required>{% for value in ['none','notes','issues'] %}<option value="{{ value }}" {% if labels.get('io.jmengit.upgrade.research', 'none') == value %}selected{% endif %}>{{ value }}</option>{% endfor %}</select><small>Notes collects GitHub releases/docs; issues also checks bounded regression reports.</small></label>
     <label>Hold override (days)<input name="hold_days" type="number" min="0" max="365" value="{{ labels.get('io.jmengit.upgrade.hold-days','') }}" placeholder="Use global default"><small>Optional; blank uses the global change-class default.</small></label>
+    <label class="check-row"><input type="checkbox" name="changelog_summary" value="true" {% if labels.get('io.jmengit.upgrade.changelog-summary') == 'true' %}checked{% endif %}><span>LLM changelog summary<small>When research runs, summarize the most important GitHub release-note changes from the installed version through the candidate version.</small></span></label>
+    <label>Source repository<input name="source" value="{{ labels.get('io.jmengit.upgrade.source','') }}" placeholder="https://github.com/owner/repository"><small>{{ source_status }}{% if not labels.get('io.jmengit.upgrade.source') and source_hint.url %}. Suggested: {{ source_hint.url }}{% endif %}</small></label>
   </div>
-  <label>Source repository<input name="source" type="url" value="{{ labels.get('io.jmengit.upgrade.source','') }}" placeholder="https://github.com/owner/repository"><small>Optional HTTPS GitHub URL for release resolution and research.</small></label>
-  <aside class="notice warn"><strong>Safe desired-state edit:</strong> Save writes only updater-owned labels to this container's dockerMan template and creates an adjacent backup. It preserves ports, paths, environment, image, and unrelated labels. It does not restart the container.</aside>
-  <button type="submit">Save authoritative labels</button>
+  <aside class="notice warn"><strong>GitHub source status:</strong> {% if labels.get('io.jmengit.upgrade.source') %}Known explicitly from the saved authoritative label.{% elif source_hint.url %}GHCR suggests <code>{{ source_hint.url }}</code>, but GHCR namespace/image names do not guarantee a same-named GitHub repository. Confirm and save it before relying on research.{% else %}Unknown. This image reference cannot be mapped safely to GitHub.{% endif %}</aside>
+  <aside class="notice"><strong>Safe desired-state edit:</strong> Save replaces only <code>io.jmengit.upgrade.*</code> arguments in dockerMan Extra Parameters, migrates obsolete updater labels, creates an adjacent backup, and preserves the image, ports, paths, environment, WUD labels, and unrelated arguments. It does not recreate or restart the container.</aside>
+  <button>Save authoritative labels</button>
 </form>
 {% endblock %}

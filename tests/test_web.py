@@ -154,10 +154,12 @@ def test_container_label_editor_writes_only_owned_labels(tmp_path: Path, monkeyp
         login(c)
         page = c.get("/containers/Example/labels")
         assert page.status_code == 200
+        assert "LLM changelog summary" in page.text
+        assert "GitHub source status" in page.text
         response = c.post("/containers/Example/labels", data={
             "csrf": token(page.text), "version": "minor", "policy": "manual",
             "research": "issues", "source": "https://github.com/example/app",
-            "hold_days": "7",
+            "hold_days": "7", "changelog_summary": "true",
         }, follow_redirects=False)
         assert response.status_code == 303
         text = template.read_text()
@@ -165,6 +167,9 @@ def test_container_label_editor_writes_only_owned_labels(tmp_path: Path, monkeyp
         assert "io.jmengit.upgrade.version=minor" in text
         assert "io.jmengit.upgrade.policy=manual" in text
         assert "io.jmengit.upgrade.research=issues" in text
+        assert "io.jmengit.upgrade.changelog-summary=true" in text
+        assert "<Label>io.jmengit.upgrade" not in text
+        assert "--label" in text
         assert template.with_suffix(".xml.bak").exists()
 
 

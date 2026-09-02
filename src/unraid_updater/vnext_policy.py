@@ -15,6 +15,7 @@ from typing import Any
 LABEL_VERSION = "io.jmengit.upgrade.version"
 LABEL_POLICY = "io.jmengit.upgrade.policy"
 LABEL_RESEARCH = "io.jmengit.upgrade.research"
+LABEL_CHANGELOG_SUMMARY = "io.jmengit.upgrade.changelog-summary"
 LABEL_SOURCE = "io.jmengit.upgrade.source"
 LABEL_HOLD_DAYS = "io.jmengit.upgrade.hold-days"
 
@@ -37,6 +38,7 @@ class LabelPolicy:
     version: UpdateVersion
     policy: ExecutionPolicy
     research: ResearchMode
+    changelog_summary: bool = False
     source: str | None = None
     hold_days: int | None = None
 
@@ -53,6 +55,9 @@ class LabelPolicy:
             research = ResearchMode(required(LABEL_RESEARCH))
         except ValueError as exc:
             raise ValueError(f"invalid upgrade policy label: {exc}") from exc
+        raw_summary = str(labels.get(LABEL_CHANGELOG_SUMMARY, "false")).strip().lower()
+        if raw_summary not in {"true", "false"}:
+            raise ValueError("changelog-summary must be true or false")
         source = str(labels[LABEL_SOURCE]).strip() if labels.get(LABEL_SOURCE) else None
         if source and not re.fullmatch(r"https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/?", source):
             raise ValueError("source must be an HTTPS GitHub owner/repository URL")
@@ -62,14 +67,17 @@ class LabelPolicy:
             if not re.fullmatch(r"(?:0|[1-9][0-9]{0,2})", raw) or not 0 <= int(raw) <= 365:
                 raise ValueError("hold-days must be an integer from 0 through 365")
             hold = int(raw)
-        return cls(version, policy, research, source, hold)
+        return cls(version=version, policy=policy, research=research,
+                   changelog_summary=raw_summary == "true", source=source, hold_days=hold)
 
     @classmethod
     def from_docker_labels(cls, labels: Mapping[str, Any]) -> LabelPolicy:
         return cls.from_labels(labels)
 
     def as_labels(self) -> dict[str, str]:
-        result = {LABEL_VERSION: self.version.value, LABEL_POLICY: self.policy.value, LABEL_RESEARCH: self.research.value}
+        result = {LABEL_VERSION: self.version.value, LABEL_POLICY: self.policy.value,
+                  LABEL_RESEARCH: self.research.value,
+                  LABEL_CHANGELOG_SUMMARY: str(self.changelog_summary).lower()}
         if self.source:
             result[LABEL_SOURCE] = self.source
         if self.hold_days is not None:

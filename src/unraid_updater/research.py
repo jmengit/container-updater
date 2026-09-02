@@ -58,19 +58,40 @@ def _repo(value: str) -> str:
     return value
 
 
+def _version(value: str) -> tuple[int, ...] | None:
+    match = re.search(r"(?:^|:|/)[vV]?(\d+(?:\.\d+){1,3})(?:$|[-+@])", value.strip())
+    if not match:
+        return None
+    return tuple(int(part) for part in match.group(1).split("."))
+
+
+def _release_range(rows: list[dict[str, Any]], current: str, candidate: str) -> tuple[list[dict[str, Any]], str]:
+    """Bound release notes to versions newer than current through candidate."""
+    low, high = _version(current), _version(candidate)
+    if low is None or high is None:
+        return rows[:30], "unresolved; showing bounded recent releases"
+    selected = []
+    for row in rows:
+        version = _version(str(row.get("tag_name") or ""))
+        if version is not None and low < version <= high:
+            selected.append(row)
+    return selected, f"{current} through {candidate}"
+
+
 def collect_github_evidence(repository: str, current: str, candidate: str, *,
                             token: str = "", max_issues: int = 12,
-                            timeout: int = 30) -> dict[str, Any]:
+                            timeout: int = 30, summarize_changelog: bool = False) -> dict[str, Any]:
     """Collect bounded public GitHub evidence; never follows arbitrary source URLs."""
     repo = _repo(repository)
     api = f"https://api.github.com/repos/{repo}"
-    releases = _request(f"{api}/releases?per_page=10", token=token, timeout=timeout)
+    releases = _request(f"{api}/releases?per_page=30", token=token, timeout=timeout)
+    releases, release_range = _release_range(releases, current, candidate)
     release_rows = [{
         "name": row.get("name") or row.get("tag_name"),
         "tag": row.get("tag_name"), "published_at": row.get("published_at"),
         "url": row.get("html_url"), "body": (row.get("body") or "")[:12000],
         "prerelease": bool(row.get("prerelease")),
-    } for row in releases[:10]]
+    } for row in releases[:30]]
     terms = " ".join(x for x in [candidate, "regression breaking bug"] if x).strip()
     query = f"repo:{repo} is:issue {terms}"[:240]
     issues = _request(
@@ -106,6 +127,8 @@ def collect_github_evidence(repository: str, current: str, candidate: str, *,
         "repository": repo, "current": current, "candidate": candidate,
         "collected_at": datetime.now(UTC).isoformat(), "releases": release_rows,
         "issues": issue_rows, "documents": documents,
+        "changelog_summary_requested": summarize_changelog,
+        "release_range": release_range,
     }
 
 
@@ -117,7 +140,10 @@ def analyze(config: ResearchConfig, evidence: dict[str, Any]) -> dict[str, Any]:
         "You are an advisory container-update risk analyst. Use only the supplied evidence. "
         "Never approve or execute an update. Return JSON with recommendation (hold|manual_review|proceed_to_human_approval), "
         "risk (low|medium|high|critical), confidence (low|medium|high), summary, breaking_changes, "
-        "reported_regressions, required_actions, and citations. Every citation must contain a URL from the evidence. "
+        "reported_regressions, required_actions, changelog_summary, and citations. "
+        "If changelog_summary_requested is true, summarize the most important user-impacting changes across every "
+        "release in the supplied current-to-candidate release range; otherwise return an empty changelog_summary. "
+        "Every citation must contain a URL from the evidence. "
         "Missing or contradictory evidence requires manual_review or hold.\nEVIDENCE:\n"
         + json.dumps(evidence, separators=(",", ":"))[:90000]
     )
@@ -150,7 +176,9 @@ def analyze(config: ResearchConfig, evidence: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
-def assess(config: ResearchConfig, repository: str, current: str, candidate: str) -> dict[str, Any]:
+def assess(config: ResearchConfig, repository: str, current: str, candidate: str,
+           *, summarize_changelog: bool = False) -> dict[str, Any]:
     evidence = collect_github_evidence(repository, current, candidate, token=config.github_token,
-                                       max_issues=config.max_issues, timeout=config.timeout_seconds)
+                                       max_issues=config.max_issues, timeout=config.timeout_seconds,
+                                       summarize_changelog=summarize_changelog)
     return {"evidence": evidence, "analysis": analyze(config, evidence)}

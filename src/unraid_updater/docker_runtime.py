@@ -99,6 +99,8 @@ def template_labels(path: Path) -> dict[str, str]:
     except (OSError, ET.ParseError) as exc:
         raise ExecutionBlocked("invalid dockerMan template XML") from exc
     labels: dict[str, str] = {}
+    # Legacy <Label> nodes are read only for migration. Deployable ExtraParams
+    # are parsed afterwards and therefore remain authoritative.
     for node in root.iter("Label"):
         if node.text and "=" in node.text:
             key, value = node.text.split("=", 1)
