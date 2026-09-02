@@ -5,6 +5,7 @@ import pytest
 from unraid_updater.label_edit import (
     LabelEditError,
     apply_policy_labels,
+    github_source_hint,
     parse_template_labels,
     policy_diff,
     runtime_labels_match,
@@ -45,7 +46,42 @@ def test_backup_created(tmp_path: Path) -> None:
     path.write_text("<Container><Labels></Labels></Container>")
     apply_policy_labels(path, LABELS)
     assert path.with_suffix(".xml.bak").exists()
-    assert parse_template_labels(path)["io.jmengit.upgrade.policy"] == "manual"
+
+
+def test_apply_migrates_owned_labels_to_extra_params_and_preserves_unrelated(tmp_path: Path) -> None:
+    path = tmp_path / "app.xml"
+    path.write_text(
+        "<Container><Repository>app:latest</Repository>"
+        "<ExtraParams>--cpus 2 --label wud.watch=true "
+        "--label io.jmengit.upgrade.risk=low --label=custom=x</ExtraParams>"
+        "<Label>io.jmengit.upgrade.policy=auto</Label><Label>other=y</Label></Container>"
+    )
+    apply_policy_labels(path, {**LABELS, "io.jmengit.upgrade.source": "https://github.com/example/app"})
+    text = path.read_text()
+    labels = parse_template_labels(path)
+    assert "--cpus 2" in text
+    assert "wud.watch=true" in text and "custom=x" in text and "other=y" in text
+    assert "io.jmengit.upgrade.risk" not in text
+    assert "<Label>io.jmengit.upgrade.policy" not in text
+    assert labels["io.jmengit.upgrade.policy"] == "manual"
+    assert labels["io.jmengit.upgrade.source"] == "https://github.com/example/app"
+
+
+def test_invalid_extra_params_fail_closed(tmp_path: Path) -> None:
+    path = tmp_path / "app.xml"
+    path.write_text('<Container><ExtraParams>--label "unterminated</ExtraParams></Container>')
+    with pytest.raises(LabelEditError, match="ExtraParams"):
+        apply_policy_labels(path, LABELS)
+
+
+def test_ghcr_source_is_only_a_suggestion() -> None:
+    assert github_source_hint("ghcr.io/hargata/lubelogger:v1.7.1") == {
+        "url": "https://github.com/hargata/lubelogger",
+        "status": "suggested from GHCR namespace; not verified",
+        "verified": False,
+    }
+    assert github_source_hint("ghcr.io/org/team/image:latest")["url"] == ""
+    assert github_source_hint("docker.io/example/app:latest")["url"] == ""
 
 
 def test_invalid_xml_rejected(tmp_path: Path) -> None:

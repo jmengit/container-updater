@@ -21,7 +21,12 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from .config import Settings
 from .db import Database
 from .docker_runtime import ExecutionBlocked, inspect_live, inventory
-from .label_edit import LabelEditError, apply_policy_labels, policy_labels
+from .label_edit import (
+    LabelEditError,
+    apply_policy_labels,
+    github_source_hint,
+    policy_labels,
+)
 from .policy_config import CHANGES, POLICIES, RISKS, normalized_gates, validate_tags
 from .portainer import target_inventory
 from .research import ResearchConfig, ResearchError, assess
@@ -346,9 +351,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         item = target_container(container_name)
         if item.get("managed_by") != "dockerMan" or not item.get("template_path"):
             raise HTTPException(status_code=409, detail="container has no unique dockerMan template")
+        labels = policy_labels(item.get("labels") or {})
+        hint = github_source_hint(str(item.get("image") or ""))
+        source_status = (
+            "explicit GitHub source configured" if labels.get("io.jmengit.upgrade.source")
+            else str(hint["status"])
+        )
         return TEMPLATES.TemplateResponse(request, "container_labels.html", {
             "csrf": csrf_token(request), "mode": settings.app_mode, "container": item,
-            "labels": policy_labels(item.get("labels") or {}),
+            "labels": labels, "source_hint": hint, "source_status": source_status,
             "runtime_synced": bool(item.get("runtime_vnext_labels_synced")),
         })
 
@@ -356,6 +367,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def save_container_labels(
         container_name: str, request: Request, csrf: str = Form(),
         version: str = Form(), policy: str = Form(), research: str = Form(),
+        changelog_summary: str | None = Form(default=None),
         source: str = Form(default=""), hold_days: str = Form(default=""),
     ):
         actor = require_auth(request)
@@ -370,6 +382,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "io.jmengit.upgrade.version": version,
             "io.jmengit.upgrade.policy": policy,
             "io.jmengit.upgrade.research": research,
+            "io.jmengit.upgrade.changelog-summary": (
+                "true" if changelog_summary == "true" else "false"
+            ),
         }
         if source.strip():
             desired["io.jmengit.upgrade.source"] = source.strip()
@@ -424,13 +439,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 )
             except ExecutionBlocked:
                 live = None
-        source = str((candidate.get("source") or {}).get("url", ""))
+        labels = candidate.get("labels") or {}
+        explicit_source = str(labels.get("io.jmengit.upgrade.source") or "")
+        resolver_source = str((candidate.get("source") or {}).get("url", ""))
+        source = explicit_source or resolver_source
         research_repository = source.removeprefix("https://github.com/").strip("/")
+        source_status = (
+            "explicit label" if explicit_source else
+            "resolver evidence" if resolver_source else
+            str(github_source_hint(str(candidate.get("image") or ""))["status"])
+        )
         return TEMPLATES.TemplateResponse(request, "candidate.html", {
             "candidate": candidate, "csrf": csrf_token(request), "mode": settings.app_mode,
             "live": live, "evidence": live, "approval": approval,
             "research_enabled": settings.research_enabled,
             "research_repository": research_repository,
+            "research_source_status": source_status,
             "research": db.latest_research(candidate_id),
             "research_configured": bool(
                 settings.research_enabled and settings.llm_base_url and settings.llm_model
@@ -570,9 +594,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             ),
         )
         try:
+            labels = candidate.get("labels") or {}
             report = assess(
                 config, repository, candidate.get("current_version") or "unknown",
                 candidate.get("target") or "unknown",
+                summarize_changelog=(
+                    str(labels.get("io.jmengit.upgrade.changelog-summary", "false")).lower()
+                    == "true"
+                ),
             )
             status_value, error = "success", ""
         except ResearchError as exc:

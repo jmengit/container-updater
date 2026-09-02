@@ -447,7 +447,7 @@ wheels = [
 
 [[package]]
 name = "container-updater"
-version = "0.8.3"
+version = "0.8.4"
 source = { editable = "." }
 dependencies = [
     { name = "apscheduler" },
